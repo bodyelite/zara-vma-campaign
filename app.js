@@ -11,6 +11,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- CONFIGURACIÓN CONSTANTE ---
 const PORT = process.env.PORT || 3000;
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
@@ -18,25 +19,17 @@ const CLIENTES_FILE = path.join(__dirname, "data", "clientes.csv");
 const AUTH_DIR = "/data/auth_info_baileys";
 const BOT_NUMBER = "56934424673"; 
 
-// VARIABLES WEB
-let webStatus = "⏳ Iniciando sistema...";
-let webCode = "";
+// --- ESTADO GLOBAL ---
 let sock;
+let webStatus = "⏳ Iniciando servidor...";
+let webCode = "";
+let qrTimeout = null;
 
-// LIMPIEZA DE EMERGENCIA AL INICIO
-try {
-    // Si hay un archivo flag de error 401, borramos todo
-    if (fs.existsSync("/data/401_detected")) {
-        console.log("♻️ RECUPERANDO DE ERROR CRÍTICO (401)...");
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-        fs.rmSync("/data/401_detected", { force: true });
-    }
-} catch (e) { console.error(e); }
-
-// EQUIPOS
+// EQUIPOS ALERTA
 const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
 const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", "56937648536@s.whatsapp.net"];
 
+// --- FUNCIONES AUXILIARES ---
 async function enviarAlerta(grupo, mensaje) {
     if (!sock) return;
     for (const numero of grupo) {
@@ -60,37 +53,40 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
     } catch (e) { return false; }
 }
 
+// --- LÓGICA DE CONEXIÓN ---
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     
     sock = makeWASocket({ 
         auth: state, 
-        printQRInTerminal: false,
+        printQRInTerminal: false, // Usamos la web para el código
         logger: pino({ level: "silent" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        browser: ["Ubuntu", "Chrome", "20.0.04"], // ESTÁNDAR FIJO
         syncFullHistory: false,
-        connectTimeoutMs: 30000, // Menos timeout para fallar rápido y reintentar
+        connectTimeoutMs: 60000,
         keepAliveIntervalMs: 10000
     });
 
+    // Manejo de Código de Vinculación
     if (!sock.authState.creds.registered) {
-        webStatus = "🟡 CONECTANDO PARA PEDIR CÓDIGO...";
-        // Esperamos un poco a que el socket abra bien antes de pedir
-        setTimeout(async () => {
+        webStatus = "🟡 ESPERANDO VINCULACIÓN";
+        
+        // Esperamos 5 segundos para asegurar que el socket esté listo
+        if (qrTimeout) clearTimeout(qrTimeout);
+        qrTimeout = setTimeout(async () => {
             try {
                 if (!sock.authState.creds.registered) {
-                    console.log("⏳ Solicitando código de vinculación...");
+                    console.log("Solicitando código...");
                     const code = await sock.requestPairingCode(BOT_NUMBER);
                     webCode = code?.match(/.{1,4}/g)?.join("-");
-                    webStatus = "🔑 CÓDIGO GENERADO - VINCULA AHORA";
-                    console.log("CLAVE WEB: " + webCode);
+                    webStatus = "🔑 CÓDIGO LISTO - VINCULA AHORA";
+                    console.log("CÓDIGO GENERADO: " + webCode);
                 }
-            } catch (e) { 
-                console.error("Fallo al pedir código:", e.message);
-                webStatus = "⚠️ Error pidiendo código. Reintentando en 5s...";
-                // No crasheamos, solo informamos
+            } catch (e) {
+                console.error("Error pidiendo código:", e.message);
+                webStatus = "⚠️ Error generando código. Espera reinicio...";
             }
-        }, 6000);
+        }, 5000);
     }
 
     sock.ev.on("connection.update", (u) => {
@@ -99,24 +95,21 @@ async function connectToWhatsApp() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             
-            webStatus = `🔴 DESCONECTADO (Code: ${statusCode})`;
-            webCode = "";
-            console.log(webStatus);
-
+            webCode = ""; // Limpiamos código al desconectar
+            
             if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
-                console.log("⚠️ CREDENCIALES ROTAS. REINICIANDO SERVIDOR...");
-                // Marcamos para borrar en el próximo inicio
-                fs.writeFileSync("/data/401_detected", "true");
-                process.exit(1); // Forzamos reinicio limpio de Render
-            } else if (shouldReconnect || statusCode === 515 || statusCode === 408) {
-                connectToWhatsApp();
+                webStatus = "❌ SESIÓN CADUCADA (Error 401). REQUIERE RESET.";
+                console.log("Credenciales inválidas. Esperando acción manual en /reset");
+                // NO REINICIAMOS AUTOMÁTICAMENTE PARA EVITAR BUCLES
+            } else {
+                webStatus = `🔴 DESCONECTADO (Code: ${statusCode}). Reconectando...`;
+                console.log(webStatus);
+                if (shouldReconnect) connectToWhatsApp();
             }
         } else if (connection === "open") {
             webStatus = "✅ ZARA ONLINE - CONECTADO Y ESTABLE";
             webCode = "";
             console.log(webStatus);
-            // Si conectó bien, aseguramos que no haya flags de error
-            if (fs.existsSync("/data/401_detected")) fs.rmSync("/data/401_detected");
         }
     });
 
@@ -128,6 +121,7 @@ async function connectToWhatsApp() {
             if (!msg.message || msg.key.fromMe) return;
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
             if (text) {
+                console.log(`📩 Msg: ${text.substring(0, 10)}...`);
                 let realJid = msg.key.remoteJid;
                 try { if (typeof jidNormalizedUser === 'function') realJid = jidNormalizedUser(msg.key.remoteJid); } catch(e) {}
                 const nombre = msg.pushName || "Cliente";
@@ -153,7 +147,9 @@ async function connectToWhatsApp() {
     });
 }
 
-// WEB ESTADO
+// --- RUTAS WEB ---
+
+// 1. ESTADO DEL BOT
 app.get('/estado', (req, res) => {
     res.send(`
     <html>
@@ -161,26 +157,53 @@ app.get('/estado', (req, res) => {
             <title>Estado Zara</title>
             <meta http-equiv="refresh" content="3">
             <style>
-                body { font-family: sans-serif; text-align: center; padding: 50px; background: #f0f2f5; }
-                .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: inline-block; }
-                .code { font-size: 40px; font-family: monospace; letter-spacing: 5px; background: #eee; padding: 10px; border-radius: 5px; margin: 20px 0; color: #008069; font-weight: bold; }
-                .status { font-size: 20px; font-weight: bold; margin-bottom: 20px; }
-                .online { color: green; } .offline { color: red; } .waiting { color: orange; }
+                body { font-family: sans-serif; text-align: center; padding: 50px; background: #f4f4f9; }
+                .card { background: white; padding: 40px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: inline-block; max-width: 500px; }
+                .code { font-size: 42px; font-family: monospace; letter-spacing: 3px; background: #e8f5e9; padding: 15px; border-radius: 8px; margin: 25px 0; color: #2e7d32; border: 2px dashed #2e7d32; }
+                .status { font-size: 22px; font-weight: bold; margin-bottom: 20px; }
+                .online { color: #2e7d32; } .offline { color: #c62828; } .waiting { color: #f57f17; }
+                .btn { display: inline-block; padding: 10px 20px; margin-top: 20px; background: #c62828; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
+                .btn:hover { background: #b71c1c; }
             </style>
         </head>
         <body>
             <div class="card">
-                <h1>🤖 Estado del Bot</h1>
+                <h1>🤖 Panel de Control Zara</h1>
                 <p class="status ${webStatus.includes('ONLINE') ? 'online' : (webStatus.includes('CÓDIGO') ? 'waiting' : 'offline')}">${webStatus}</p>
-                ${webCode ? `<div class="code">${webCode}</div><p>Vincular con número en WhatsApp</p>` : ''}
-                ${webStatus.includes('ONLINE') ? '<p>🚀 Sistema listo.</p>' : ''}
+                
+                ${webCode ? `
+                    <p>Tu código de vinculación es:</p>
+                    <div class="code">${webCode}</div>
+                    <p><small>WhatsApp > Dispositivos > Vincular</small></p>
+                ` : ''}
+                
+                ${webStatus.includes('401') ? `
+                    <p>⚠️ La sesión está rota.</p>
+                    <a href="/reset" class="btn">♻️ BORRAR SESIÓN Y REINICIAR</a>
+                ` : ''}
+
+                ${webStatus.includes('ONLINE') ? '<p>🚀 El sistema opera normalmente.</p>' : ''}
             </div>
         </body>
     </html>
     `);
 });
 
-app.get('/api/history', (req, res) => { if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'))); else res.json({}); });
+// 2. REINICIO MANUAL (BOTÓN DE PÁNICO)
+app.get('/reset', (req, res) => {
+    try {
+        console.log("♻️ EJECUTANDO RESET MANUAL...");
+        if (fs.existsSync(AUTH_DIR)) {
+            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        }
+        res.send("<h1>♻️ Sistema Reiniciado</h1><p>Borrando credenciales y reiniciando... Vuelve a <a href='/estado'>/estado</a> en 10 segundos.</p>");
+        setTimeout(() => process.exit(0), 1000); // Reinicio controlado
+    } catch (e) {
+        res.send("Error al reiniciar: " + e.message);
+    }
+});
+
+// 3. MONITOR CRM
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
@@ -189,6 +212,10 @@ app.get('/monitor', (req, res) => {
     }
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
+
+app.get('/api/history', (req, res) => { if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'))); else res.json({}); });
+
+// 4. ENVÍO CAMPAÑA
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: Bot desconectado");
     if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: Falta clientes.csv");
@@ -211,4 +238,7 @@ app.get('/iniciar-envio', async (req, res) => {
     res.end("Campaña finalizada.");
 });
 
-app.listen(PORT, () => { console.log(`Puerto ${PORT}`); connectToWhatsApp(); });
+app.listen(PORT, () => { 
+    console.log(`Puerto ${PORT}`); 
+    connectToWhatsApp(); 
+});
