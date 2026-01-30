@@ -14,7 +14,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 const PORT = process.env.PORT || 3000;
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
-const CLIENTES_FILE = path.join(__dirname, "clientes.csv");
+
+// --- CORRECCIÓN AQUÍ: Apuntamos a la carpeta data ---
+const CLIENTES_FILE = path.join(__dirname, "data", "clientes.csv");
 
 // EQUIPOS DE ALERTA
 const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
@@ -35,7 +37,6 @@ async function enviarAlerta(grupo, mensaje) {
 
 function formatearFonoAlerta(jid) {
     const limpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
-    // Si es un ID técnico largo (>15 dígitos), lo ocultamos para que no se vea feo
     if (limpio.length > 15) return "(ID Privado - Ver Nombre)";
     return `+${limpio}`;
 }
@@ -158,9 +159,17 @@ app.get('/monitor', (req, res) => {
 
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: WhatsApp Desconectado");
-    if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: No existe clientes.csv");
+    
+    // VERIFICACIÓN CON RUTA CORRECTA
+    if (!fs.existsSync(CLIENTES_FILE)) {
+        console.error("No encuentro el archivo en:", CLIENTES_FILE);
+        // INFO DE DEPURACIÓN: Le decimos al usuario dónde buscamos
+        return res.send(`Error Crítico: No encuentro el archivo. Busqué en: ${CLIENTES_FILE}`);
+    }
+    
     const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
-    res.write("Enviando...");
+    res.write("Enviando... (Si ves esto, el archivo se leyo bien)\n");
+    
     for (const linea of filas.slice(1)) {
         const [fono, nombre] = linea.split(',');
         if (fono) {
@@ -170,7 +179,7 @@ app.get('/iniciar-envio', async (req, res) => {
                 await sock.sendMessage(jid, { text: msg });
                 registrarChat(fono.trim(), nombre.trim(), msg, true);
                 res.write(".");
-                await delay(5000);
+                await delay(5000); // 5 segundos entre mensajes
             } catch (e) { console.error(e); }
         }
     }
@@ -190,9 +199,8 @@ async function connectToWhatsApp() {
         if (!msg.message || msg.key.fromMe) return;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
         if (text) {
-            // INTENTO DE NORMALIZACIÓN + EXTRACCIÓN REAL
             let realJid = jidNormalizedUser(msg.key.remoteJid);
-            if (msg.key.participant) realJid = jidNormalizedUser(msg.key.participant); // A veces viene aquí en grupos/multidispositivo
+            if (msg.key.participant) realJid = jidNormalizedUser(msg.key.participant);
 
             const nombre = msg.pushName || "Cliente";
             
