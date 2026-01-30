@@ -5,102 +5,138 @@ require("dotenv").config();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Historial de conversación en memoria
 const conversationHistory = {};
 
-// Función segura para leer archivos (evita que se caiga si falta uno)
-const safeRead = (filePath) => {
+// ---------- Helpers ----------
+const safeRead = (filePath, fallback = "") => {
   try {
     return fs.readFileSync(filePath, "utf-8");
   } catch (e) {
-    console.error("Error leyendo archivo:", filePath);
-    return ""; // Retorna vacío si falla, no rompe el bot
+    console.error("safeRead error:", filePath, e.message);
+    return fallback;
   }
 };
 
-// Carga de contexto unificada
-const getContext = () => {
-  // 1. Cargar Precios VMA
-  const vmaPath = path.join(__dirname, "../data/vma_precios.txt");
-  const vmaData = safeRead(vmaPath);
+// Cache Context
+let cachedContext = null;
+let cachedAt = 0;
+const CONTEXT_TTL_MS = 2 * 60 * 1000;
 
-  // 2. Cargar Info Body Elite
-  const businessPath = path.join(__dirname, "../data/business.txt");
-  const businessData = safeRead(businessPath);
+const buildContext = () => {
+  const vmaPath = path.join(__dirname, "../data/vma_precios.txt");
+  const vma = safeRead(vmaPath, "SIN DATOS.");
   
   return `
-  Eres Camila (Zara), Concierge de VMA Uniformes y Body Elite.
+Eres Camila, Concierge de VMA.
+TU ESTRATEGIA: ORDEN SECUENCIAL STRICTO ("UNO A LA VEZ").
+
+DATOS DE PRECIOS REALES:
+${vma}
+
+⚠️ REGLA DE ORO "UNO A UNO":
+Si el cliente pide para 2 o más niños (Ej: "Niña 12 y Niño 16"), ESTÁ PROHIBIDO MOSTRAR AMBAS LISTAS JUNTAS.
+Debes resolver al primero por completo antes de siquiera mencionar al segundo.
+
+GUIÓN DE FLUJO (SÍGUELO):
+
+PASO 1: CONTEXTO
+- Obtén: COLEGIO + TALLAS + SEXO.
+
+PASO 2: EL PRIMER NIÑO (SOLO EL PRIMERO)
+- Cliente: "Mayor, tallas 12 y 16, niña y niño".
+- Tú: "Perfecto, vamos por partes para no enredarnos 🌸.
+  Empecemos con la **Niña (Talla 12)** 👧.
   
-  === TUS FUENTES DE VERDAD (NO INVENTES NADA FUERA DE ESTO) ===
+  Aquí está todo lo oficial para ella:"
+  (MUESTRA LA LISTA COMPLETA DEL ARCHIVO PARA ESA TALLA, NO RESUMAS).
+  👕 *Polera:* $XX.XXX
+  👗 *Falda/Jumper:* $XX.XXX
+  🧥 *Polar:* $XX.XXX
+  ✨ *Parka:* $XX.XXX
+  (Incluye todo lo que aparezca en la lista: delantales, calzas, etc).
   
-  [TABLA DE PRECIOS Y STOCK VMA]
-  (Interpretación: Las columnas son tallas. Si una celda dice "NO", "-", o está vacía, NO HAY STOCK).
-  ${vmaData}
+  - Cierre: "¿Qué te gustaría dejar listo para ella?"
+  - (⛔️ DETENTE AQUÍ. NO HABLES DEL NIÑO AÚN).
 
-  [DATOS BODY ELITE]
-  ${businessData}
-
-  === REGLAS DE LÓGICA (STRICT MODE) ===
+PASO 3: EL CIERRE DEL PRIMERO Y PASE AL SEGUNDO
+- Cliente: "La falda y el polar".
+- Tú: "Anotado para la niña ✅.
+  Ahora pasemos al **Niño (Talla 16)** 👦.
   
-  1. **DETECCIÓN DE CANTIDAD (CRÍTICO):**
-     - Si el cliente habla en SINGULAR (ej: "mi hija", "el niño", "necesito talla 14"), ASUME QUE ES SOLO UNO. Vende directo. NO preguntes "¿hay alguien más?" ni "¿cómo se llama?".
-     - SOLO si el cliente dice explícitamente PLURAL (ej: "mis hijos", "tengo dos", "la mayor y el chico"), aplicas la regla de "vamos uno por uno".
+  Esto es lo que tengo para él:"
+  (MUESTRA LISTA COMPLETA DEL NIÑO).
+  👕 *Polera:* $XX.XXX
+  👖 *Pantalón:* $XX.XXX
+  ...
+  
+  - Cierre: "¿Qué necesitas de aquí?"
 
-  2. **LECTURA DE STOCK:**
-     - Mira la tabla VMA. Si piden una talla y en la tabla sale precio, DI EL PRECIO.
-     - Si en la tabla sale "NO" o vacío, di: "Esa talla está agotada/crítica por ahora".
-     - Identifica el colegio del cliente. Si no lo dice, pregúntalo.
+PASO 4: RESUMEN FINAL Y AGENDA
+- Suma todo (Niña + Niño).
+- "El total final es **$XX.XXX**.
+  ¿Cuándo crees que podrías pasar a la tienda? (Te sugiero venir pronto para evitar filas 🏃💨)."
 
-  3. **ESTRATEGIA DE VENTA:**
-     - Objetivo 1: Cerrar el uniforme VMA (urgencia: evitar filas de marzo).
-     - Objetivo 2: SOLO al confirmar el uniforme o cerrar la venta, ofrece el beneficio de Body Elite (Evaluación IA Gratis o descuentos) como un "regalo" o "plus".
+PASO 5: EL DATO BODY ELITE (SOLO AL FINAL)
+- Cuando te den fecha: "Agendado. Oye, te cuento que activé tu beneficio en **Body Elite** (al lado): Evaluación Gratis + 10% Dcto en tratamientos (Lipo sin cirugía, Faciales, Láser). ¿Aprovechamos y te agendo evaluación ahí mismo?"
 
-  4. **PERSONALIDAD:**
-     - Eres ejecutiva, eficiente y usas formato WhatsApp (breve).
-     - No saludes de nuevo si ya hay conversación.
-  `;
+TONO:
+Ordenada. Usas emojis. Eres visual. NO te saltas pasos.
+`;
 };
 
-async function chatWithGPT(text, jid) {
-    // Inicializar historial si es nuevo
-    if (!conversationHistory[jid]) {
-      conversationHistory[jid] = [
+const getContext = () => {
+  const now = Date.now();
+  if (!cachedContext || now - cachedAt > CONTEXT_TTL_MS) {
+    cachedContext = buildContext();
+    cachedAt = now;
+  }
+  return cachedContext;
+};
+
+const chatWithGPT = async (message, remoteJid) => {
+  try {
+    if (!remoteJid) remoteJid = "unknown";
+
+    if (!conversationHistory[remoteJid]) {
+      conversationHistory[remoteJid] = [
         { role: "system", content: getContext() },
-        // Mensaje inicial "fantasma" para dar contexto de que ya saludamos
-        { role: "assistant", content: "Hola, soy Camila de VMA. ¿Te ayudo con los uniformes?" } 
+        // IMPLANTE DE MEMORIA:
+        { 
+            role: "assistant", 
+            content: "Hola, soy Camila de VMA. Te escribo para dejar listos los uniformes hoy y así te ahorras las filas horribles de marzo 🏃💨. ¿Te ayudo a revisar tallas o precios por acá?" 
+        }
       ];
     }
 
-    // Agregar mensaje del usuario
-    conversationHistory[jid].push({ role: "user", content: String(text || "") });
+    conversationHistory[remoteJid].push({ role: "user", content: String(message || "") });
 
-    // Mantener memoria corta (últimos 16 mensajes para no gastar tokens ni confundirse)
-    if (conversationHistory[jid].length > 18) {
-      conversationHistory[jid] = [
-        conversationHistory[jid][0], // Mantener System Prompt
-        ...conversationHistory[jid].slice(-16) // Mantener últimos mensajes
+    const MAX_MESSAGES = 22; 
+    const KEEP_TAIL = 16; 
+    if (conversationHistory[remoteJid].length > MAX_MESSAGES) {
+      conversationHistory[remoteJid] = [
+        conversationHistory[remoteJid][0], 
+        conversationHistory[remoteJid][1], 
+        ...conversationHistory[remoteJid].slice(-KEEP_TAIL),
       ];
     }
 
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini", // Rápido y eficiente
-            messages: conversationHistory[jid],
-            temperature: 0.2, // Baja temperatura = NO alucinaciones, se pega al archivo
-            max_tokens: 400,
-        });
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      messages: conversationHistory[remoteJid],
+      temperature: 0.2, 
+      max_tokens: 650, 
+    });
 
-        const reply = response.choices[0].message.content;
-        
-        // Guardar respuesta en historial
-        conversationHistory[jid].push({ role: "assistant", content: reply });
-        
-        return reply;
+    const reply = (response.choices?.[0]?.message?.content || "").trim();
+    const safeReply = reply || "¿Me confirmas el colegio?";
 
-    } catch (error) {
-        console.error("Error OpenAI:", error);
-        return "Dame un segundo, estoy revisando el stock en bodega..."; // Fallback elegante
-    }
-}
+    conversationHistory[remoteJid].push({ role: "assistant", content: safeReply });
+
+    return safeReply;
+  } catch (e) {
+    console.error("Error OpenAI:", e);
+    return "Dame un segundo, estoy revisando el stock...";
+  }
+};
 
 module.exports = { chatWithGPT };
