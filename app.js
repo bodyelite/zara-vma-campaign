@@ -17,27 +17,20 @@ const CHAT_HISTORY_FILE = "/data/historial_chats.json";
 const CLIENTES_FILE = path.join(__dirname, "data", "clientes.csv");
 const AUTH_DIR = "/data/auth_info_baileys";
 
-// --- NÚMERO DEL BOT PARA VINCULACIÓN ---
-const BOT_NUMBER = "56934424673"; // Extraído de tus logs anteriores
-
-// --- BORRADO DE SESIÓN CORRUPTA ---
-try {
-    if (fs.existsSync(AUTH_DIR)) {
-        console.log("♻️ BORRANDO SESIÓN ANTIGUA (Modo Re-Vinculación)...");
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-    }
-} catch (e) { console.error("Error limpieza:", e); }
-
 // EQUIPOS ALERTA
 const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
 const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", "56937648536@s.whatsapp.net"];
 
 let sock;
 
+// Función segura para enviar alertas sin tumbar el bot
 async function enviarAlerta(grupo, mensaje) {
     if (!sock) return;
     for (const numero of grupo) {
-        try { await sock.sendMessage(numero, { text: mensaje }); } catch (e) {}
+        try { 
+            await delay(1000); // Pequeña pausa para no saturar
+            await sock.sendMessage(numero, { text: mensaje }); 
+        } catch (e) { console.error(`Error alerta:`, e.message); }
     }
 }
 
@@ -46,7 +39,9 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
         let chats = {};
         if (fs.existsSync(CHAT_HISTORY_FILE)) chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         const fonoLimpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
+        
         if (!chats[fonoLimpio]) chats[fonoLimpio] = { nombre, mensajes: [], unread: 0, lastTs: 0 };
+        
         chats[fonoLimpio].mensajes.push({
             hora: new Date().toLocaleTimeString('es-CL'),
             texto: mensaje,
@@ -55,6 +50,7 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
         chats[fonoLimpio].lastTs = Date.now();
         if (!esBot) chats[fonoLimpio].unread = (chats[fonoLimpio].unread || 0) + 1;
         else chats[fonoLimpio].unread = 0;
+        
         if (chats[fonoLimpio].mensajes.length > 60) chats[fonoLimpio].mensajes.shift();
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
         return true; 
@@ -64,36 +60,32 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     
+    // CONFIGURACIÓN ROBUSTA (CAMBIO DE BROWSER)
     sock = makeWASocket({ 
         auth: state, 
-        printQRInTerminal: false, // APAGAMOS QR para usar Código
-        logger: pino({ level: "silent" }), // Menos ruido
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
+        printQRInTerminal: false,
+        logger: pino({ level: "silent" }),
+        // "Mac OS" es más estable para evitar desconexiones
+        browser: ["Mac OS", "Chrome", "10.15.7"],
+        syncFullHistory: false, // Para conectar más rápido
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 10000,
+        emitOwnEvents: false,
     });
-
-    // --- SOLICITUD DE CÓDIGO DE VINCULACIÓN ---
-    if (!sock.authState.creds.registered) {
-        console.log("⏳ ESPERANDO GENERAR CÓDIGO DE VINCULACIÓN...");
-        setTimeout(async () => {
-            try {
-                const code = await sock.requestPairingCode(BOT_NUMBER);
-                console.log("\n==================================================");
-                console.log("🔑 TU CÓDIGO DE VINCULACIÓN ES:  " + code?.match(/.{1,4}/g)?.join("-"));
-                console.log("==================================================\n");
-                console.log("👉 Ve a WhatsApp > Dispositivos Vinculados > Vincular con número de teléfono");
-            } catch (e) {
-                console.error("❌ Error pidiendo código:", e.message);
-            }
-        }, 4000);
-    }
 
     sock.ev.on("connection.update", (u) => {
         const { connection, lastDisconnect } = u;
         if (connection === "close") {
-            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) connectToWhatsApp();
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            console.log(`❌ Conexión cerrada (Code: ${statusCode}). Reconectando: ${shouldReconnect}`);
+            
+            // Si es error 428 (Precondition Required), reconectamos agresivamente
+            if (shouldReconnect) {
+                setTimeout(connectToWhatsApp, 2000); 
+            }
         } else if (connection === "open") {
-            console.log("✅ ZARA ONLINE - CONECTADO Y LISTO");
+            console.log("✅ ZARA ONLINE - CONEXIÓN ESTABLECIDA (Mac OS Mode)");
         }
     });
 
@@ -103,10 +95,17 @@ async function connectToWhatsApp() {
         try {
             const msg = messages[0];
             if (!msg.message || msg.key.fromMe) return;
+            
+            // Evitar mensajes de estado/reacciones
+            if (msg.message.protocolMessage || msg.message.reactionMessage) return;
+
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+            
             if (text) {
+                console.log(`📩 Recibido: ${text.substring(0, 20)}...`);
                 let realJid = msg.key.remoteJid;
-                // Intento seguro de normalizar
+                
+                // Normalización segura
                 try {
                      if (typeof jidNormalizedUser === 'function') {
                         realJid = jidNormalizedUser(msg.key.remoteJid);
@@ -116,22 +115,21 @@ async function connectToWhatsApp() {
 
                 const nombre = msg.pushName || "Cliente";
                 
+                // 1. Guardar y Alerta Nuevo
                 const esNuevo = registrarChat(realJid, nombre, text, false);
-                // ALERTA DE NUEVO
                 if (esNuevo) {
                      const fono = realJid.split('@')[0];
                      await enviarAlerta(STAFF_VMA, `🔔 NUEVO: ${nombre} (+${fono})`);
                 }
 
-                // RESPUESTA IA
+                // 2. IA y Respuesta
                 try {
                     const response = await chatWithGPT(text, realJid);
                     await sock.sendMessage(msg.key.remoteJid, { text: response });
                     registrarChat(realJid, nombre, response, true);
                     
-                    // ALERTA AGENDA/BODY
+                    // Alertas de Negocio
                     const botTxt = response.toLowerCase();
-                    const userTxt = text.toLowerCase();
                     const fono = realJid.split('@')[0];
 
                     if (botTxt.includes("agendado") && botTxt.includes("body")) {
@@ -143,14 +141,13 @@ async function connectToWhatsApp() {
 
                 } catch (gptError) {
                     console.error("Error IA:", gptError);
-                    await sock.sendMessage(msg.key.remoteJid, { text: "Dame un segundo, estoy revisando... 🌸" });
                 }
             }
-        } catch (e) { console.error("Error Upsert:", e); }
+        } catch (e) { console.error("Error en upsert:", e.message); }
     });
 }
 
-// Rutas
+// Rutas Express
 app.get('/api/history', (req, res) => {
     if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')));
     else res.json({});
@@ -163,25 +160,42 @@ app.get('/monitor', (req, res) => {
     }
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
+
+// ENVÍO DE CAMPAÑA MÁS LENTO Y SEGURO
 app.get('/iniciar-envio', async (req, res) => {
-    if (!sock) return res.send("Error: WhatsApp Desconectado");
+    if (!sock) return res.send("Error: Bot desconectado");
     if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: No existe data/clientes.csv");
+    
     const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
-    res.write("Enviando...\n");
-    for (const linea of filas.slice(1)) {
+    res.write("Iniciando envio seguro...\n");
+    
+    // Empezamos desde el índice 1 (saltando cabecera)
+    for (let i = 1; i < filas.length; i++) {
+        const linea = filas[i];
         const [fono, nombre] = linea.split(',');
-        if (fono) {
+        
+        if (fono && fono.length > 8) {
             const jid = fono.trim() + "@s.whatsapp.net";
             const msg = `Hola ${nombre.trim()}, soy Camila de VMA. ¿Te ayudo con los uniformes?`;
+            
             try {
+                // Verificar si el socket está abierto antes de enviar
                 await sock.sendMessage(jid, { text: msg });
                 registrarChat(jid, nombre.trim(), msg, true);
-                res.write(`OK: ${nombre}\n`);
+                res.write(`✅ Enviado a ${nombre} (${i}/${filas.length-1})\n`);
+                
+                // ESPERA DE 8 SEGUNDOS ENTRE MENSAJES PARA EVITAR DESCONEXIÓN
+                await delay(8000); 
+                
+            } catch (e) { 
+                console.error(`Fallo envío a ${nombre}:`, e.message);
+                res.write(`❌ Error con ${nombre}: ${e.message}\n`);
+                // Si falla, esperamos un poco más antes de seguir
                 await delay(5000);
-            } catch (e) { console.error(e); }
+            }
         }
     }
-    res.end("Finalizado.");
+    res.end("Campaña finalizada.");
 });
 
 app.listen(PORT, () => { console.log(`Puerto ${PORT}`); connectToWhatsApp(); });
