@@ -16,12 +16,13 @@ const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
 const CLIENTES_FILE = path.join(__dirname, "data", "clientes.csv");
 const AUTH_DIR = "/data/auth_info_baileys";
-const BOT_NUMBER = "56934424673"; // Tu número de bot
+const BOT_NUMBER = "56934424673"; 
 
-// --- BORRADO DE SESIÓN 401 (OBLIGATORIO PARA REVINCULAR) ---
+// --- BORRADO OBLIGATORIO AL INICIO (HARD RESET) ---
+// Esto garantiza que no queden basuras de la sesión 401
 try {
     if (fs.existsSync(AUTH_DIR)) {
-        console.log("♻️ DETECTADO ERROR 401: BORRANDO SESIÓN PARA NUEVO CÓDIGO...");
+        console.log("♻️ MODO HARD RESET: Borrando sesión anterior para empezar de cero...");
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
     }
 } catch (e) { console.error("Error limpieza:", e); }
@@ -69,18 +70,18 @@ async function connectToWhatsApp() {
         auth: state, 
         printQRInTerminal: false,
         logger: pino({ level: "silent" }),
-        browser: ["Mac OS", "Chrome", "10.15.7"], // Usamos Mac para estabilidad
+        // VOLVEMOS A UBUNTU (ESTÁNDAR) PARA EVITAR PROBLEMAS
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
         syncFullHistory: false
     });
 
-    // SOLICITUD DE CÓDIGO NUEVO
     if (!sock.authState.creds.registered) {
-        console.log("⏳ ESPERANDO CÓDIGO DE VINCULACIÓN...");
+        console.log("⏳ GENERANDO NUEVO CÓDIGO DE VINCULACIÓN...");
         setTimeout(async () => {
             try {
                 const code = await sock.requestPairingCode(BOT_NUMBER);
                 console.log("\n==================================================");
-                console.log("🔑 CÓDIGO NUEVO:  " + code?.match(/.{1,4}/g)?.join("-"));
+                console.log("🔑 CÓDIGO DE VINCULACIÓN:  " + code?.match(/.{1,4}/g)?.join("-"));
                 console.log("==================================================\n");
             } catch (e) { console.error("❌ Error código:", e.message); }
         }, 5000);
@@ -90,11 +91,19 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect } = u;
         if (connection === "close") {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut; // Si es 401 (LoggedOut), NO reconecta solo, requiere código
-            console.log(`❌ Conexión cerrada (Code: ${statusCode}). Reconectando: ${shouldReconnect}`);
-            if (shouldReconnect) connectToWhatsApp();
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut; 
+            console.log(`❌ Desconectado (Code: ${statusCode}). Reconectando: ${shouldReconnect}`);
+            
+            // Si nos vuelve a dar 401, forzamos reinicio del servidor para limpiar
+            if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
+                console.log("⚠️ CREDENCIALES INVÁLIDAS. REINICIANDO PROCESO...");
+                fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+                process.exit(0); // Esto hace que Render reinicie la app desde cero
+            } else if (shouldReconnect) {
+                connectToWhatsApp();
+            }
         } else if (connection === "open") {
-            console.log("✅ ZARA ONLINE - CONECTADO");
+            console.log("✅ ZARA ONLINE - CONECTADO Y ESTABLE");
         }
     });
 
@@ -106,7 +115,7 @@ async function connectToWhatsApp() {
             if (!msg.message || msg.key.fromMe) return;
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
             if (text) {
-                console.log(`📩 Recibido: ${text.substring(0, 10)}...`);
+                console.log(`📩 Recibido: ${text.substring(0, 15)}...`);
                 let realJid = msg.key.remoteJid;
                 try {
                      if (typeof jidNormalizedUser === 'function') {
@@ -155,7 +164,7 @@ app.get('/monitor', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
 
-// ENVÍO LENTO (20 SEGUNDOS)
+// ENVÍO LENTO (20s)
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: Bot desconectado");
     if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: Falta clientes.csv");
@@ -173,10 +182,7 @@ app.get('/iniciar-envio', async (req, res) => {
                 await sock.sendMessage(jid, { text: msg });
                 registrarChat(jid, nombre.trim(), msg, true);
                 res.write(`✅ Enviado a ${nombre} (${i}/${filas.length-1})\n`);
-                
-                // PAUSA DE 20 SEGUNDOS
                 await delay(20000); 
-                
             } catch (e) { 
                 res.write(`❌ Error ${nombre}: ${e.message}\n`);
                 await delay(5000);
