@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor Camila - VMA & Body Elite</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
+        .tabs { display: flex; border-bottom: 2px solid #ccc; }
+        .tab { padding: 10px 20px; cursor: pointer; background: #ddd; margin-right: 5px; border-radius: 5px 5px 0 0; }
+        .tab.active { background: #fff; font-weight: bold; border-bottom: 2px solid white; margin-bottom: -2px; }
+        .content { background: #fff; padding: 20px; border: 1px solid #ccc; min-height: 400px; display: none; }
+        .content.active { display: block; }
+        h2 { margin-top: 0; }
+        .log-box { background: #000; color: #0f0; padding: 10px; height: 300px; overflow-y: scroll; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Monitor Camila: VMA + Body Elite</h1>
+    <div class="tabs">
+        <div class="tab active" onclick="openTab('vma')">Clientes VMA</div>
+        <div class="tab" onclick="openTab('bodyelite')">Interesados Body Elite</div>
+    </div>
+
+    <div id="vma" class="content active">
+        <h2>Historial Conversaciones VMA</h2>
+        <div class="log-box" id="log-vma">Cargando interacciones VMA...</div>
+    </div>
+
+    <div id="bodyelite" class="content">
+        <h2>Leads Body Elite (Alianza)</h2>
+        <div class="log-box" id="log-body">Cargando leads Body Elite...</div>
+    </div>
+
+    <script>
+        function openTab(tabName) {
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+        // Aquí se conectará el WebSocket o Fetch para traer la data real
+    </script>
+</body>
+</html>

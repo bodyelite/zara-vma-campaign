@@ -1,0 +1,29 @@
+[INFORMACIÓN NEGOCIO BODY ELITE]
+- Alianza VMA: Evaluación gratuita con IA + 10% Dcto exclusivo.
+- Objetivo: Agendar la evaluación.
+
+
+nombre: "Body Elite",
+ 
+    staff_alertas: ["56983300262", "56955145504", "56937648536"], 
+    direccion: "Av. Las Perdices 2990, Local 23, Peñalolén (Strip Center Las Pircas)",
+    ubicacion_detalle: "Desde Metro Quilín (Línea 4) 🚇, puedes tomar la micro D17v 🚌 hacia el oriente. Nos bajamos justo en el Strip Center Las Perdices.", tenemos estacionamientos gratuitos
+
+Si algun cliente pide el telefono de la clinica le damos este 56983300262
+
+No es necesario usar todos los planes, debemos concentrarnos en lipo express como eje corporal, face antiage como eje facial y rostro, y depilacion full, igualmente pueden conversar sobre mas planes y precios, pero concentrar siempre por zona como eje estos tres.
+
+INFORMACION CLINICA Y PRECIOS
+
+
+    "lipo_express": { plan: "Lipo Express", precio: "$432.000", semanas: "8 semanas", tecnologias: "HIFU 12D, Radiofrecuencia, Prosculpt", beneficio: "Reducción real de talla y firmeza sin cirugía" },
+    "body_tensor": { plan: "Body Tensor", precio: "$232.000", semanas: "6 semanas", tecnologias: "HIFU 12D, Radiofrecuencia", beneficio: "Tensado de piel y definición" },
+    "lipo_body_elite": { plan: "Lipo Body Elite", precio: "$664.000", semanas: "8 semanas", tecnologias: "HIFU 12D, RF, Lipoláser, Prosculpt", beneficio: "Transformación corporal completa" },
+    "lipo_reductiva": { plan: "Lipo Reductiva", precio: "$480.000", semanas: "8 semanas", tecnologias: "HIFU 12D, RF, Prosculpt, Lipoláser", beneficio: "Disminución de grasa localizada y firmeza" },
+    "push_up": { plan: "Push Up Glúteos", precio: "$376.000", semanas: "8 semanas", tecnologias: "HIFU 12D, Radiofrecuencia, Prosculpt", beneficio: "Glúteo firme y levantado" },
+    "full_face": { plan: "Full Face", precio: "$584.000", semanas: "6 semanas", tecnologias: "HIFU 12D facial, Pink Glow, Toxina (Botox)", beneficio: "Rejuvenecimiento total de rostro" },
+    "face_antiage": { plan: "Face Antiage", precio: "$281.600", semanas: "4 semanas", tecnologias: "HIFU 12D facial, Toxina (Botox), Limpieza", beneficio: "Disminución visible de arrugas y flacidez (Opción económica con Botox)" },
+    "face_inicia": { plan: "Face Inicia", precio: "$270.400", semanas: "4 semanas", tecnologias: "HIFU 12D facial, RF, Limpieza", beneficio: "Mejora calidad de piel (Sin Botox)" },
+    "face_smart": { plan: "Face Smart", precio: "$198.400", semanas: "3 semanas", tecnologias: "Limpieza, Pink Glow, HIFU", beneficio: "Iluminación y piel uniforme" },
+    "depilacion_full": { plan: "Depilación Full", precio: "$259.200", semanas: "6 semanas", tecnologias: "Láser (6 sesiones)", beneficio: "Eliminación vello rostro + axila + rebaje + pierna" }
+};
