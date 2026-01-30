@@ -140,7 +140,6 @@ async function connectToWhatsApp() {
                 const fonoMaestro = obtenerFonoMaestro(realJid, nombre);
                 const esNuevo = registrarChat(fonoMaestro, nombre, text, null, false);
 
-                // ALERTA 1: INICIAL (Siempre que es nuevo chat)
                 if (esNuevo) await enviarAlerta(STAFF_VMA, `🔔 NUEVO CONTACTO: ${nombre} (+${fonoMaestro})`);
 
                 try {
@@ -148,32 +147,23 @@ async function connectToWhatsApp() {
                     const response = await chatWithGPT(text, fonoMaestro, historial);
                     await sock.sendMessage(msg.key.remoteJid, { text: response });
                     
-                    // --- TRIGGERS DE ALERTAS MEJORADOS ---
                     let tag = null;
                     const botTxt = response.toLowerCase();
                     const userTxt = text.toLowerCase();
 
-                    // ALERTA VENTA VMA: Detecta cierre de retiro
                     if (botTxt.includes("agendamos el retiro") || botTxt.includes("te espero el") || botTxt.includes("retiro agendado") || botTxt.includes("quedamos para el")) {
                         tag = "VMA_VENTA";
                         await enviarAlerta(STAFF_VMA, `💰 VENTA VMA CERRADA: ${nombre}`);
                     }
-                    
-                    // ALERTA INTERÉS BODY: Detecta preguntas sobre tratamientos
                     if ((botTxt.includes("hifu") || botTxt.includes("lipo") || botTxt.includes("depilación")) && !botTxt.includes("agendado")) {
                         tag = "BODY_INTERES";
                         await enviarAlerta(STAFF_BODY, `👀 INTERÉS INFO BODY: ${nombre}`);
                     }
-                    
-                    // ALERTA CITA BODY: Detecta agenda + correo (o intento de agenda)
-                    // Se activa si el bot confirma agenda O si el usuario acaba de dar un correo
                     if ((botTxt.includes("agendamos") && botTxt.includes("body")) || (userTxt.includes("@") && botTxt.includes("agendado"))) {
                         tag = "BODY_CITA";
                         await enviarAlerta(STAFF_BODY, `✅ CITA BODY CONFIRMADA: ${nombre}\n(Revisar Email en el chat)`);
                     }
-
                     registrarChat(fonoMaestro, nombre, response, tag, true);
-
                 } catch (gptError) { console.error("Error IA:", gptError); }
             }
         } catch (e) { console.error("Upsert error:", e.message); }
@@ -196,8 +186,13 @@ app.post('/api/delete-bulk', (req, res) => {
     } catch(e) { res.status(500).send(e.message); }
 });
 
-// RUTAS
+// RUTAS STANDARD
 app.get('/estado', (req, res) => res.send(`<html><head><meta http-equiv="refresh" content="3"></head><body><h1>${webStatus}</h1><h2>${webCode}</h2></body></html>`));
+app.get('/reset', (req, res) => {
+    if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    res.send("<h1>♻️ Reiniciando...</h1><script>setTimeout(()=>window.location='/estado',5000)</script>");
+    setTimeout(() => process.exit(0), 1000);
+});
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) return res.status(401).send('Acceso denegado');
