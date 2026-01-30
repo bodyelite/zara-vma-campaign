@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, jidNormalizedUser } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const express = require("express");
 const fs = require("fs");
@@ -22,88 +22,117 @@ const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", 
 
 let sock;
 
+// Función simple de logs
+function log(msg) {
+    console.log(`[LOG] ${new Date().toLocaleTimeString()} - ${msg}`);
+}
+
 async function enviarAlerta(grupo, mensaje) {
     if (!sock) return;
     for (const numero of grupo) {
-        try { await sock.sendMessage(numero, { text: mensaje }); } 
-        catch (e) { console.error(`Error alerta a ${numero}`, e.message); }
+        try { await sock.sendMessage(numero, { text: mensaje }); } catch (e) {}
     }
 }
 
-function formatearFonoAlerta(jid) {
-    const limpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
-    if (limpio.length > 15) return "(ID Privado)";
-    return `+${limpio}`;
-}
-
 function registrarChat(jid, nombre, mensaje, esBot = false) {
-    let chats = {};
-    let esNuevo = false;
+    // Versión simplificada a prueba de fallos
     try {
-        if (fs.existsSync(CHAT_HISTORY_FILE)) {
-            chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
-        }
+        let chats = {};
+        if (fs.existsSync(CHAT_HISTORY_FILE)) chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        
         const fonoLimpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
         
-        if (!chats[fonoLimpio]) {
-            chats[fonoLimpio] = { nombre, mensajes: [], unread: 0, lastTs: 0 };
-            esNuevo = true;
-        }
+        if (!chats[fonoLimpio]) chats[fonoLimpio] = { nombre, mensajes: [], unread: 0, lastTs: 0 };
         
         chats[fonoLimpio].mensajes.push({
-            hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+            hora: new Date().toLocaleTimeString('es-CL'),
             texto: mensaje,
             from: esBot ? 'Zara' : 'Cliente'
         });
-
         chats[fonoLimpio].lastTs = Date.now();
         if (!esBot) chats[fonoLimpio].unread = (chats[fonoLimpio].unread || 0) + 1;
-        else chats[fonoLimpio].unread = 0; 
+        else chats[fonoLimpio].unread = 0;
+        
         if (chats[fonoLimpio].mensajes.length > 60) chats[fonoLimpio].mensajes.shift();
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
-    } catch (e) { console.error("Error historial:", e.message); }
-    return esNuevo;
+        return true; 
+    } catch (e) {
+        log("Error guardando chat: " + e.message);
+        return false;
+    }
 }
 
-async function verificarAlertas(realJid, nombre, msgCliente, msgBot, esNuevo) {
-    try {
-        const fonoVisual = formatearFonoAlerta(realJid);
-        const clienteTxt = msgCliente.toLowerCase();
-        const botTxt = (msgBot || "").toLowerCase();
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState("/data/auth_info_baileys");
+    
+    // LOG LEVEL INFO para ver si se desconecta
+    sock = makeWASocket({ 
+        auth: state, 
+        logger: pino({ level: "info" }), 
+        printQRInTerminal: false,
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
+    });
 
-        if (esNuevo && !msgBot) {
-            await enviarAlerta(STAFF_VMA, `🔔 *NUEVO CLIENTE VMA*\n👤 ${nombre}\n📱 ${fonoVisual}`);
-            return;
+    sock.ev.on("connection.update", (u) => {
+        const { connection, lastDisconnect } = u;
+        if (connection === "close") {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            log(`Conexión cerrada. Reconectando: ${shouldReconnect}`);
+            if (shouldReconnect) connectToWhatsApp();
+        } else if (connection === "open") {
+            log("✅ ZARA ONLINE - CONEXIÓN ESTABLECIDA");
         }
-        if (botTxt.includes("resumen final") && (botTxt.includes("retiro") || botTxt.includes("fecha"))) {
-            await enviarAlerta(STAFF_VMA, `✅ *PEDIDO VMA CONFIRMADO*\n👤 ${nombre}\n📱 ${fonoVisual}\n\n📋 *Detalle:*\n${msgBot}`);
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        try {
+            log("EVENTO RAW RECIBIDO (Alguien escribió algo)"); // ESTO DEBE SALIR SI O SI
+            
+            const msg = messages[0];
+            if (!msg.message) return;
+            if (msg.key.fromMe) {
+                log("Ignorando mensaje propio (fromMe)");
+                return;
+            }
+
+            const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+            
+            if (text) {
+                log(`📩 MENSAJE DE ${msg.key.remoteJid}: ${text}`);
+                
+                // JID SIMPLE (Sin funciones raras)
+                const remoteJid = msg.key.remoteJid;
+                const nombre = msg.pushName || "Cliente";
+
+                // 1. Guardar
+                registrarChat(remoteJid, nombre, text, false);
+
+                // 2. IA
+                log("🤖 Preguntando a GPT...");
+                const response = await chatWithGPT(text, remoteJid);
+                log(`✅ GPT Respondió: ${response}`);
+
+                // 3. Responder
+                await sock.sendMessage(remoteJid, { text: response });
+                registrarChat(remoteJid, nombre, response, true);
+
+            } else {
+                log("Mensaje recibido pero sin texto (sticker, audio, etc)");
+            }
+        } catch (e) {
+            console.error("❌ ERROR FATAL EN UPSERT:", e);
         }
-        const keywordsBody = ["que hacen", "precio", "lipo", "facial", "agendar", "me interesa", "bueno", "si, gracias", "evaluacion", "body elite"];
-        if (keywordsBody.some(k => clienteTxt.includes(k)) && clienteTxt.length > 2) {
-             await enviarAlerta(STAFF_BODY, `👀 *INTERÉS BODY DETECTADO*\n👤 ${nombre}\n📱 ${fonoVisual}\n💬 "${msgCliente}"`);
-        }
-        if (botTxt.includes("body elite") && (botTxt.includes("agendado") || botTxt.includes("reserva"))) {
-            await enviarAlerta(STAFF_BODY, `📅 *CITA BODY AGENDADA*\n👤 ${nombre}\n📱 ${fonoVisual}\n\n🤖 *Confirmación:*\n${msgBot}`);
-        }
-    } catch (e) { console.error("Error en alertas:", e.message); }
+    });
 }
 
-// Rutas Express (Monitor, API, Excel)
-app.get('/mark-read', (req, res) => {
-    // ...misma lógica...
-    res.json({ success: true });
-});
+// Rutas Express Esenciales
 app.get('/api/history', (req, res) => {
     if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')));
     else res.json({});
 });
-app.get('/api/export-excel', async (req, res) => {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Chats');
-    sheet.columns = [{ header: 'Data', key: 'data' }]; 
-    // ... simplificado para no alargar, la logica excel original estaba bien ...
-    res.end(); 
-});
+
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
@@ -113,13 +142,13 @@ app.get('/monitor', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
 
-// ENVÍO CAMPAÑA
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: WhatsApp Desconectado");
-    if (!fs.existsSync(CLIENTES_FILE)) return res.send(`Error: No existe ${CLIENTES_FILE}`);
+    if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: No existe el archivo CSV");
     
     const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
     res.write("Enviando...\n");
+    
     for (const linea of filas.slice(1)) {
         const [fono, nombre] = linea.split(',');
         if (fono) {
@@ -127,71 +156,16 @@ app.get('/iniciar-envio', async (req, res) => {
             const msg = `Hola ${nombre.trim()}, soy Camila de VMA. ¿Te ayudo con los uniformes?`;
             try {
                 await sock.sendMessage(jid, { text: msg });
-                registrarChat(fono.trim(), nombre.trim(), msg, true);
-                res.write(`Ok: ${nombre}\n`);
-                await delay(5000);
-            } catch (e) { console.error(e); res.write(`Error: ${nombre}\n`); }
+                registrarChat(jid, nombre.trim(), msg, true);
+                res.write(`Enviado a ${nombre}\n`);
+                await delay(4000);
+            } catch (e) { console.error(e); }
         }
     }
     res.end("Finalizado.");
 });
 
-async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState("/data/auth_info_baileys");
-    sock = makeWASocket({ auth: state, logger: pino({ level: "error" }), printQRInTerminal: false, browser: ["Ubuntu", "Chrome", "20.0.04"] });
-    sock.ev.on("connection.update", (u) => {
-        if (u.connection === "open") console.log("✅ Zara Online");
-        if (u.connection === "close") setTimeout(connectToWhatsApp, 5000);
-    });
-    sock.ev.on("creds.update", saveCreds);
-
-    // --- MANEJO DE MENSAJES BLINDADO ---
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-        try {
-            const msg = messages[0];
-            if (!msg.message || msg.key.fromMe) return;
-            const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-            
-            if (text) {
-                console.log("📩 Mensaje recibido:", text); // LOG 1
-
-                // Intentamos obtener JID real, si falla usamos el raw
-                let realJid = msg.key.remoteJid;
-                try {
-                    if (typeof jidNormalizedUser === 'function') {
-                        realJid = jidNormalizedUser(msg.key.remoteJid);
-                        if (msg.key.participant) realJid = jidNormalizedUser(msg.key.participant);
-                    }
-                } catch (e) { console.error("Error normalizando JID:", e.message); }
-
-                const nombre = msg.pushName || "Cliente";
-                
-                // 1. Registrar entrada
-                const esNuevo = registrarChat(realJid, nombre, text, false);
-                if (esNuevo) await verificarAlertas(realJid, nombre, text, "", true);
-
-                // 2. CONSULTAR GPT (Con Try/Catch extra)
-                let response = "";
-                try {
-                    console.log("🤖 Consultando a Camila AI..."); // LOG 2
-                    response = await chatWithGPT(text, realJid);
-                    console.log("✅ Respuesta generada:", response); // LOG 3
-                } catch (gptError) {
-                    console.error("❌ Error CRÍTICO en ChatGPT:", gptError);
-                    response = "Lo siento, tuve un pequeño error técnico. ¿Me repites por favor? 🌸";
-                }
-
-                // 3. ENVIAR RESPUESTA
-                await sock.sendMessage(msg.key.remoteJid, { text: response });
-                
-                // 4. Registrar salida
-                registrarChat(realJid, nombre, response, true);
-                await verificarAlertas(realJid, nombre, text, response, false);
-            }
-        } catch (globalError) {
-            console.error("❌ Error GLOBAL en upsert:", globalError);
-        }
-    });
-}
-
-app.listen(PORT, () => { console.log(`Puerto ${PORT}`); connectToWhatsApp(); });
+app.listen(PORT, () => { 
+    log(`Servidor iniciado en puerto ${PORT}`); 
+    connectToWhatsApp(); 
+});
