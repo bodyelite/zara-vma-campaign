@@ -16,6 +16,15 @@ const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
 const CLIENTES_FILE = path.join(__dirname, "data", "clientes.csv");
 const AUTH_DIR = "/data/auth_info_baileys";
+const BOT_NUMBER = "56934424673"; // Tu número de bot
+
+// --- BORRADO DE SESIÓN 401 (OBLIGATORIO PARA REVINCULAR) ---
+try {
+    if (fs.existsSync(AUTH_DIR)) {
+        console.log("♻️ DETECTADO ERROR 401: BORRANDO SESIÓN PARA NUEVO CÓDIGO...");
+        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    }
+} catch (e) { console.error("Error limpieza:", e); }
 
 // EQUIPOS ALERTA
 const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
@@ -23,14 +32,13 @@ const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", 
 
 let sock;
 
-// Función segura para enviar alertas sin tumbar el bot
 async function enviarAlerta(grupo, mensaje) {
     if (!sock) return;
     for (const numero of grupo) {
         try { 
-            await delay(1000); // Pequeña pausa para no saturar
+            await delay(2000); 
             await sock.sendMessage(numero, { text: mensaje }); 
-        } catch (e) { console.error(`Error alerta:`, e.message); }
+        } catch (e) {}
     }
 }
 
@@ -39,9 +47,7 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
         let chats = {};
         if (fs.existsSync(CHAT_HISTORY_FILE)) chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         const fonoLimpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
-        
         if (!chats[fonoLimpio]) chats[fonoLimpio] = { nombre, mensajes: [], unread: 0, lastTs: 0 };
-        
         chats[fonoLimpio].mensajes.push({
             hora: new Date().toLocaleTimeString('es-CL'),
             texto: mensaje,
@@ -50,7 +56,6 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
         chats[fonoLimpio].lastTs = Date.now();
         if (!esBot) chats[fonoLimpio].unread = (chats[fonoLimpio].unread || 0) + 1;
         else chats[fonoLimpio].unread = 0;
-        
         if (chats[fonoLimpio].mensajes.length > 60) chats[fonoLimpio].mensajes.shift();
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
         return true; 
@@ -60,32 +65,36 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     
-    // CONFIGURACIÓN ROBUSTA (CAMBIO DE BROWSER)
     sock = makeWASocket({ 
         auth: state, 
         printQRInTerminal: false,
         logger: pino({ level: "silent" }),
-        // "Mac OS" es más estable para evitar desconexiones
-        browser: ["Mac OS", "Chrome", "10.15.7"],
-        syncFullHistory: false, // Para conectar más rápido
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 10000,
-        emitOwnEvents: false,
+        browser: ["Mac OS", "Chrome", "10.15.7"], // Usamos Mac para estabilidad
+        syncFullHistory: false
     });
+
+    // SOLICITUD DE CÓDIGO NUEVO
+    if (!sock.authState.creds.registered) {
+        console.log("⏳ ESPERANDO CÓDIGO DE VINCULACIÓN...");
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(BOT_NUMBER);
+                console.log("\n==================================================");
+                console.log("🔑 CÓDIGO NUEVO:  " + code?.match(/.{1,4}/g)?.join("-"));
+                console.log("==================================================\n");
+            } catch (e) { console.error("❌ Error código:", e.message); }
+        }, 5000);
+    }
 
     sock.ev.on("connection.update", (u) => {
         const { connection, lastDisconnect } = u;
         if (connection === "close") {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut; // Si es 401 (LoggedOut), NO reconecta solo, requiere código
             console.log(`❌ Conexión cerrada (Code: ${statusCode}). Reconectando: ${shouldReconnect}`);
-            
-            // Si es error 428 (Precondition Required), reconectamos agresivamente
-            if (shouldReconnect) {
-                setTimeout(connectToWhatsApp, 2000); 
-            }
+            if (shouldReconnect) connectToWhatsApp();
         } else if (connection === "open") {
-            console.log("✅ ZARA ONLINE - CONEXIÓN ESTABLECIDA (Mac OS Mode)");
+            console.log("✅ ZARA ONLINE - CONECTADO");
         }
     });
 
@@ -95,59 +104,44 @@ async function connectToWhatsApp() {
         try {
             const msg = messages[0];
             if (!msg.message || msg.key.fromMe) return;
-            
-            // Evitar mensajes de estado/reacciones
-            if (msg.message.protocolMessage || msg.message.reactionMessage) return;
-
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-            
             if (text) {
-                console.log(`📩 Recibido: ${text.substring(0, 20)}...`);
+                console.log(`📩 Recibido: ${text.substring(0, 10)}...`);
                 let realJid = msg.key.remoteJid;
-                
-                // Normalización segura
                 try {
                      if (typeof jidNormalizedUser === 'function') {
                         realJid = jidNormalizedUser(msg.key.remoteJid);
                         if (msg.key.participant) realJid = jidNormalizedUser(msg.key.participant);
                      }
                 } catch(e) {}
-
                 const nombre = msg.pushName || "Cliente";
                 
-                // 1. Guardar y Alerta Nuevo
                 const esNuevo = registrarChat(realJid, nombre, text, false);
                 if (esNuevo) {
                      const fono = realJid.split('@')[0];
                      await enviarAlerta(STAFF_VMA, `🔔 NUEVO: ${nombre} (+${fono})`);
                 }
 
-                // 2. IA y Respuesta
                 try {
                     const response = await chatWithGPT(text, realJid);
                     await sock.sendMessage(msg.key.remoteJid, { text: response });
                     registrarChat(realJid, nombre, response, true);
                     
-                    // Alertas de Negocio
                     const botTxt = response.toLowerCase();
                     const fono = realJid.split('@')[0];
-
                     if (botTxt.includes("agendado") && botTxt.includes("body")) {
                         await enviarAlerta(STAFF_BODY, `📅 AGENDADO BODY: ${nombre} (+${fono})`);
                     }
                     if (botTxt.includes("resumen final")) {
                          await enviarAlerta(STAFF_VMA, `✅ PEDIDO OK: ${nombre} (+${fono})`);
                     }
-
-                } catch (gptError) {
-                    console.error("Error IA:", gptError);
-                }
+                } catch (gptError) { console.error("Error IA:", gptError); }
             }
-        } catch (e) { console.error("Error en upsert:", e.message); }
+        } catch (e) { console.error("Upsert error:", e.message); }
     });
 }
 
-// Rutas Express
+// Rutas
 app.get('/api/history', (req, res) => {
     if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')));
     else res.json({});
@@ -161,36 +155,30 @@ app.get('/monitor', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
 
-// ENVÍO DE CAMPAÑA MÁS LENTO Y SEGURO
+// ENVÍO LENTO (20 SEGUNDOS)
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: Bot desconectado");
-    if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: No existe data/clientes.csv");
+    if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: Falta clientes.csv");
     
     const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
-    res.write("Iniciando envio seguro...\n");
+    res.write("Iniciando envio LENTO (20s)...\n");
     
-    // Empezamos desde el índice 1 (saltando cabecera)
     for (let i = 1; i < filas.length; i++) {
         const linea = filas[i];
         const [fono, nombre] = linea.split(',');
-        
         if (fono && fono.length > 8) {
             const jid = fono.trim() + "@s.whatsapp.net";
             const msg = `Hola ${nombre.trim()}, soy Camila de VMA. ¿Te ayudo con los uniformes?`;
-            
             try {
-                // Verificar si el socket está abierto antes de enviar
                 await sock.sendMessage(jid, { text: msg });
                 registrarChat(jid, nombre.trim(), msg, true);
                 res.write(`✅ Enviado a ${nombre} (${i}/${filas.length-1})\n`);
                 
-                // ESPERA DE 8 SEGUNDOS ENTRE MENSAJES PARA EVITAR DESCONEXIÓN
-                await delay(8000); 
+                // PAUSA DE 20 SEGUNDOS
+                await delay(20000); 
                 
             } catch (e) { 
-                console.error(`Fallo envío a ${nombre}:`, e.message);
-                res.write(`❌ Error con ${nombre}: ${e.message}\n`);
-                // Si falla, esperamos un poco más antes de seguir
+                res.write(`❌ Error ${nombre}: ${e.message}\n`);
                 await delay(5000);
             }
         }
