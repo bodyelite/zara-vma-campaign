@@ -20,18 +20,20 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
     let chats = {};
     try {
         if (fs.existsSync(CHAT_HISTORY_FILE)) chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
-        if (!chats[jid]) chats[jid] = { nombre, mensajes: [] };
-        chats[jid].mensajes.push({
+        const fonoLimpio = jid.split('@')[0]; [cite: 2026-01-30]
+        if (!chats[fonoLimpio]) chats[fonoLimpio] = { nombre, mensajes: [] };
+        
+        chats[fonoLimpio].mensajes.push({
             hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
             texto: mensaje,
             from: esBot ? 'Zara' : 'Cliente'
         });
-        if (chats[jid].mensajes.length > 50) chats[jid].mensajes.shift();
+        
+        if (chats[fonoLimpio].mensajes.length > 50) chats[fonoLimpio].mensajes.shift();
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
     } catch (e) { console.error(e); }
 }
 
-// === MONITOR LAYOUT WHATSAPP WEB === [cite: 2026-01-30]
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
@@ -43,44 +45,53 @@ app.get('/monitor', (req, res) => {
     
     res.send(`
     <!DOCTYPE html>
-    <html lang="es">
+    <html>
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="refresh" content="10">
-        <title>Zara Web Monitor</title>
+        <title>Zara Web Pro</title>
+        <script>
+            // Recarga automática suave sin saltos de scroll [cite: 2026-01-30]
+            setTimeout(() => { location.reload(); }, 10000);
+            window.onload = () => { 
+                const container = document.getElementById('messages-container');
+                container.scrollTop = container.scrollHeight; 
+            };
+        </script>
         <style>
-            body { margin: 0; font-family: Segoe UI, Helvetica Neue, Helvetica, Lucida Grande, Arial; background-color: #eae6df; display: flex; height: 100vh; }
-            #side { width: 30%; background: white; border-right: 1px solid #d1d7db; overflow-y: auto; }
-            #main { width: 70%; display: flex; flex-direction: column; background: #efeae2; }
-            .header { background: #f0f2f5; padding: 10px 16px; display: flex; align-items: center; border-bottom: 1px solid #d1d7db; font-weight: bold; }
-            .chat-list-item { padding: 12px 16px; border-bottom: 1px solid #f0f2f5; cursor: pointer; transition: 0.2s; }
-            .chat-list-item:hover { background: #f5f6f6; }
-            .chat-list-item .name { font-weight: 500; color: #111b21; }
-            .chat-list-item .phone { font-size: 0.8em; color: #667781; }
-            #messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
-            .msg { max-width: 65%; padding: 8px 12px; border-radius: 8px; margin-bottom: 4px; font-size: 14.2px; position: relative; box-shadow: 0 1px 0.5px rgba(11,20,26,.13); }
-            .msg.zara { align-self: flex-end; background-color: #d9fdd3; color: #111b21; }
-            .msg.cliente { align-self: flex-start; background-color: #fff; color: #111b21; }
-            .msg .time { font-size: 10px; color: #667781; text-align: right; margin-top: 4px; }
+            body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; height: 100vh; background: #f0f2f5; }
+            #sidebar { width: 350px; background: white; border-right: 1px solid #d1d7db; display: flex; flex-direction: column; }
+            #chat-area { flex: 1; display: flex; flex-direction: column; background: #efeae2; position: relative; }
+            .header-bar { background: #f0f2f5; padding: 10px 16px; height: 40px; display: flex; align-items: center; border-bottom: 1px solid #d1d7db; font-weight: bold; color: #54656f; }
+            .contact-item { padding: 15px; border-bottom: 1px solid #f0f2f5; cursor: pointer; display: flex; flex-direction: column; }
+            .contact-item:hover { background: #f5f6f6; }
+            .contact-name { font-weight: 500; color: #111b21; margin-bottom: 3px; }
+            .contact-phone { font-size: 0.85em; color: #667781; }
+            #messages-container { flex: 1; padding: 20px 50px; overflow-y: scroll; display: flex; flex-direction: column; }
+            .bubble { max-width: 60%; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; line-height: 19px; position: relative; box-shadow: 0 1px 1px rgba(0,0,0,0.1); }
+            .bubble.zara { align-self: flex-end; background: #d9fdd3; }
+            .bubble.cliente { align-self: flex-start; background: white; }
+            .bubble .time { font-size: 11px; color: #667781; text-align: right; margin-top: 4px; }
         </style>
     </head>
     <body>
-        <div id="side">
-            <div class="header">Chats Recientes</div>
-            ${Object.keys(chats).reverse().map(jid => `
-                <div class="chat-list-item">
-                    <div class="name">${chats[jid].nombre}</div>
-                    <div class="phone">+${jid.split('@')[0]}</div>
-                </div>
-            `).join('')}
+        <div id="sidebar">
+            <div class="header-bar">Contactos Activos</div>
+            <div style="overflow-y:auto;">
+                ${Object.keys(chats).reverse().map(fono => `
+                    <div class="contact-item">
+                        <span class="contact-name">${chats[fono].nombre}</span>
+                        <span class="contact-phone">📱 +${fono}</span>
+                    </div>
+                `).join('')}
+            </div>
         </div>
-        <div id="main">
-            <div class="header">Consola de Conversación Activa</div>
-            <div id="messages">
-                ${Object.keys(chats).reverse().map(jid => `
-                    <div style="text-align:center; font-size: 12px; margin: 20px 0; color: #667781; border-bottom: 1px dashed #ccc;">Historial con +${jid.split('@')[0]}</div>
-                    ${chats[jid].mensajes.map(m => `
-                        <div class="msg ${m.from === 'Zara' ? 'zara' : 'cliente'}">
+        <div id="chat-area">
+            <div class="header-bar">Conversaciones en Tiempo Real (Zara Core)</div>
+            <div id="messages-container">
+                ${Object.keys(chats).reverse().map(fono => `
+                    <div style="text-align:center; color:#667781; font-size:12px; margin:20px 0; border-top:1px solid #d1d7db; padding-top:10px;">Chat con +${fono}</div>
+                    ${chats[fono].mensajes.map(m => `
+                        <div class="bubble ${m.from === 'Zara' ? 'zara' : 'cliente'}">
                             ${m.texto}
                             <div class="time">${m.hora}</div>
                         </div>
@@ -93,9 +104,8 @@ app.get('/monitor', (req, res) => {
     `);
 });
 
-// Ruta de disparo masivo [cite: 2026-01-30]
 app.get('/iniciar-envio', async (req, res) => {
-    if (!sock) return res.send("Error: Desconectado");
+    if (!sock) return res.send("Error: WhatsApp no conectado");
     const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
     for (const linea of filas.slice(1)) {
         const [fono, nombre] = linea.split(',');
