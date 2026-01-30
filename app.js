@@ -19,16 +19,18 @@ let sock;
 function registrarChat(jid, nombre, mensaje, esBot = false) {
     let chats = {};
     try {
-        if (fs.existsSync(CHAT_HISTORY_FILE)) chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        if (fs.existsSync(CHAT_HISTORY_FILE)) {
+            chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        }
         if (!chats[jid]) chats[jid] = { nombre, mensajes: [] };
         chats[jid].mensajes.push({
             hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
             texto: mensaje,
             from: esBot ? 'Camila' : 'Cliente'
         });
-        if (chats[jid].mensajes.length > 30) chats[jid].mensajes.shift();
+        if (chats[jid].mensajes.length > 50) chats[jid].mensajes.shift();
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
-    } catch (e) { console.error("Error monitor:", e); }
+    } catch (e) { console.error("Error Monitor:", e); }
 }
 
 app.get('/monitor', (req, res) => {
@@ -37,35 +39,61 @@ app.get('/monitor', (req, res) => {
         res.setHeader('WWW-Authenticate', 'Basic realm="Monitor"');
         return res.status(401).send('Acceso denegado');
     }
-    let htmlChats = '<p style="text-align:center;">No hay mensajes registrados aún en /data</p>';
+    let htmlChats = '<p style="text-align:center; padding:20px;">Esperando actividad en tiempo real...</p>';
     if (fs.existsSync(CHAT_HISTORY_FILE)) {
         const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         htmlChats = Object.keys(chats).reverse().map(jid => `
-            <div style="background:white; border-radius:10px; padding:15px; margin-bottom:15px; border-left:5px solid #0084ff;">
-                <h4>👤 ${chats[jid].nombre} (${jid.split('@')[0]})</h4>
-                <div style="font-size:0.9em; background:#f9f9f9; padding:10px; border-radius:5px;">
-                    ${chats[jid].mensajes.map(m => `<p style="text-align:${m.from === 'Camila' ? 'right' : 'left'}"><b>${m.from}:</b> ${m.texto}</p>`).join('')}
+            <div style="background:white; border-radius:12px; padding:20px; margin-bottom:20px; border-left:6px solid #0084ff; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                <h3 style="margin:0 0 10px 0;">👤 ${chats[jid].nombre} <small style="font-weight:normal; color:#888;">(${jid.split('@')[0]})</small></h3>
+                <div style="background:#f0f2f5; padding:15px; border-radius:8px; max-height:300px; overflow-y:auto;">
+                    ${chats[jid].mensajes.map(m => `
+                        <div style="margin-bottom:10px; text-align:${m.from === 'Camila' ? 'right' : 'left'}">
+                            <span style="display:inline-block; padding:8px 12px; border-radius:15px; background:${m.from === 'Camila' ? '#0084ff' : '#ffffff'}; color:${m.from === 'Camila' ? 'white' : 'black'}; box-shadow:0 1px 2px rgba(0,0,0,0.1);">
+                                ${m.texto}
+                            </span>
+                        </div>
+                    `).join('')}
                 </div>
             </div>
         `).join('');
     }
-    res.send(`<html><head><meta http-equiv="refresh" content="5"></head><body style="font-family:sans-serif; background:#f0f2f5; padding:20px;"><div style="max-width:700px; margin:auto;"><h1>💬 Monitor Camila VMA</h1>${htmlChats}</div></body></html>`);
+    res.send(`
+        <html>
+            <head><meta http-equiv="refresh" content="5"><title>Consola Camila</title></head>
+            <body style="font-family:-apple-system, sans-serif; background:#f0f2f5; padding:20px;">
+                <div style="max-width:800px; margin:auto;">
+                    <h1 style="text-align:center;">💬 Camila VMA Live</h1>
+                    ${htmlChats}
+                </div>
+            </body>
+        </html>
+    `);
 });
 
 app.get('/iniciar-envio', async (req, res) => {
-    if (!sock) return res.send("Bot no iniciado");
-    const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
+    if (!sock) return res.send("Bot no conectado");
+    if (!fs.existsSync(CLIENTES_FILE)) return res.send("CSV no encontrado");
+    
+    const lineas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
+    const filas = lineas.slice(1);
+    
+    res.setHeader('Content-Type', 'text/plain');
+    res.write("Lanzando campaña...\n");
+    
     for (const linea of filas) {
         const [fono, nombre] = linea.split(',');
-        if (fono && fono.length > 8) {
+        if (fono) {
             const jid = fono.trim() + "@s.whatsapp.net";
             const texto = `Hola ${nombre.trim()}, soy Camila de VMA. ¿Te ayudo con los uniformes?`;
-            await sock.sendMessage(jid, { text: texto });
-            registrarChat(jid, nombre.trim(), texto, true);
-            await delay(5000);
+            try {
+                await sock.sendMessage(jid, { text: texto });
+                registrarChat(jid, nombre.trim(), texto, true);
+                res.write(`✅ ${nombre}\n`);
+                await delay(5000);
+            } catch (e) { res.write(`❌ ${nombre}: ${e.message}\n`); }
         }
     }
-    res.send("Campaña iniciada");
+    res.end("Campaña completada.");
 });
 
 async function connectToWhatsApp() {
@@ -79,27 +107,28 @@ async function connectToWhatsApp() {
 
     sock.ev.on("connection.update", (u) => {
         if (u.connection === "open") console.log("✅ SISTEMA ONLINE");
-        if (u.connection === "close") connectToWhatsApp();
+        if (u.connection === "close") setTimeout(connectToWhatsApp, 5000);
     });
 
-    sock.ev.on("messages.upsert", async ({ messages, type }) => {
-        if (type !== 'notify') return; // Ignora mensajes antiguos de sincronización [cite: 2026-01-30]
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
         const jid = msg.key.remoteJid;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-        
+
         if (text) {
-            console.log(`📩 Mensaje de ${jid}: ${text}`);
+            console.log(`📩 Entrada de ${jid}: ${text}`);
             registrarChat(jid, msg.pushName || "Cliente", text, false);
-            const response = await chatWithGPT(text, jid);
-            await sock.sendMessage(jid, { text: response });
-            registrarChat(jid, msg.pushName || "Cliente", response, true);
+            try {
+                const response = await chatWithGPT(text, jid);
+                await sock.sendMessage(jid, { text: response });
+                registrarChat(jid, msg.pushName || "Cliente", response, true);
+            } catch (err) { console.error("Error GPT/WSP:", err); }
         }
     });
-
-    sock.ev.on("creds.update", saveCreds);
 }
 
 app.listen(PORT, () => {
