@@ -1,171 +1,83 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monitor Zara V2.0 🚀</title>
+    <meta charset="UTF-8"><title>Zara Master Monitor</title>
     <style>
-        :root { --primary: #25d366; --dark: #121b22; --light: #f0f2f5; --accent: #00a884; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--light); }
-        
-        /* Sidebar */
-        #sidebar { width: 350px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
-        .header { padding: 15px; background: var(--light); border-bottom: 1px solid #ddd; }
-        .tabs { display: flex; gap: 5px; padding: 10px; background: white; }
-        .tab-btn { flex: 1; padding: 8px; border: none; background: #eee; border-radius: 5px; cursor: pointer; font-size: 12px; }
-        .tab-btn.active { background: var(--primary); color: white; font-weight: bold; }
-        
-        #chat-list { flex: 1; overflow-y: auto; }
-        .chat-item { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; position: relative; }
-        .chat-item:hover { background: #f9f9f9; }
-        .chat-item.active { background: #ebebeb; border-left: 4px solid var(--primary); }
-        .chat-info { flex: 1; }
-        .chat-name { font-weight: bold; display: block; margin-bottom: 3px; }
-        .chat-last { font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
-        
-        .badge-unread { background: #25d366; color: white; border-radius: 50%; padding: 2px 7px; font-size: 11px; font-weight: bold; }
-        .tag-pill { font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 5px; }
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; background: #f0f2f5; }
+        #list { width: 350px; background: white; border-right: 1px solid #ccc; overflow-y: auto; }
+        #chat { flex: 1; display: flex; flex-direction: column; background: #e5ddd5; }
+        .item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; position: relative; }
+        .item:hover { background: #f9f9f9; }
+        .active { background: #e9edef !important; }
+        .unread-dot { width: 12px; height: 12px; background: #25d366; border-radius: 50%; position: absolute; right: 15px; top: 20px; }
+        .tag { font-size: 10px; padding: 2px 5px; border-radius: 4px; margin-right: 5px; }
         .tag-vma { background: #dcf8c6; color: #075e54; }
-        .tag-body { background: #e1f5fe; color: #0277bd; }
-
-        /* Main Chat */
-        #chat-main { flex: 1; display: flex; flex-direction: column; background: #efeae2; }
-        #chat-header { padding: 15px; background: white; border-bottom: 1px solid #ddd; font-weight: bold; }
-        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
-        .msg { max-width: 70%; padding: 10px 15px; border-radius: 8px; font-size: 14px; line-height: 1.4; position: relative; }
-        .msg.Cliente { align-self: flex-start; background: white; border-radius: 0 8px 8px 8px; }
-        .msg.Zara { align-self: flex-end; background: #dcf8c6; border-radius: 8px 0 8px 8px; }
-        .msg-time { font-size: 10px; color: #999; margin-top: 5px; display: block; text-align: right; }
-        .msg-date-divider { align-self: center; background: #e1f3fb; padding: 4px 12px; border-radius: 5px; font-size: 11px; color: #555; margin: 10px 0; }
-
-        .btn-delete { background: #ff5252; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; float: right; font-size: 11px; }
+        .tag-body { background: #bbdefb; color: #0d47a1; }
+        #msgs { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; }
+        .msg { padding: 10px; border-radius: 8px; margin-bottom: 8px; max-width: 70%; font-size: 14px; }
+        .msg.Cliente { align-self: flex-start; background: white; }
+        .msg.Zara { align-self: flex-end; background: #dcf8c6; }
+        .header { padding: 15px; background: #ededed; font-weight: bold; }
+        .tabs { display: flex; background: #eee; padding: 5px; }
+        .tab { flex: 1; text-align: center; padding: 8px; cursor: pointer; font-size: 12px; }
+        .tab.active { background: white; font-weight: bold; border-radius: 5px; }
     </style>
 </head>
 <body>
-
-<div id="sidebar">
-    <div class="header">
-        <h3>Zara Monitor 🤖</h3>
-        <input type="text" id="search" placeholder="Buscar nombre o fono..." style="width:100%; padding:8px; border-radius:5px; border:1px solid #ddd;">
+    <div id="list">
+        <div class="header">Chats Zara</div>
+        <div class="tabs">
+            <div class="tab active" onclick="setF('all')">Todos</div>
+            <div class="tab" onclick="setF('vma')">VMA (Ventas)</div>
+            <div class="tab" onclick="setF('body')">Body Elite</div>
+        </div>
+        <div id="chat-items"></div>
     </div>
-    <div class="tabs">
-        <button class="tab-btn active" onclick="setFilter('all')">Todos</button>
-        <button class="tab-btn" onclick="setFilter('vma')">VMA</button>
-        <button class="tab-btn" onclick="setFilter('body')">Body</button>
+    <div id="chat">
+        <div id="chat-head" class="header">Selecciona un chat</div>
+        <div id="msgs"></div>
     </div>
-    <div id="chat-list"></div>
-</div>
-
-<div id="chat-main">
-    <div id="chat-header">Selecciona un chat para ver la conversación</div>
-    <div id="messages"></div>
-</div>
-
-<script>
-    let allChats = {};
-    let currentFilter = 'all';
-    let currentChatId = null;
-
-    async function loadHistory() {
-        try {
-            const res = await fetch('/api/history');
-            allChats = await res.json();
-            renderChatList();
-            if (currentChatId) renderMessages(currentChatId);
-        } catch (e) { console.error("Error cargando historial"); }
-    }
-
-    function renderChatList() {
-        const list = document.getElementById('chat-list');
-        const search = document.getElementById('search').value.toLowerCase();
-        list.innerHTML = '';
-
-        // Ordenar por último mensaje (descendente)
-        const sortedIds = Object.keys(allChats).sort((a, b) => allChats[b].lastTs - allChats[a].lastTs);
-
-        sortedIds.forEach(id => {
-            const chat = allChats[id];
-            const tags = chat.tags || [];
-            
-            // Filtros
-            if (currentFilter === 'vma' && !tags.some(t => t.includes('VMA'))) return;
-            if (currentFilter === 'body' && !tags.some(t => t.includes('BODY'))) return;
-            if (search && !chat.nombre.toLowerCase().includes(search) && !id.includes(search)) return;
-
-            const item = document.createElement('div');
-            item.className = `chat-item ${currentChatId === id ? 'active' : ''}`;
-            item.onclick = () => { currentChatId = id; renderMessages(id); renderChatList(); };
-
-            const unread = chat.unread > 0 ? `<span class="badge-unread">${chat.unread}</span>` : '';
-            const lastMsg = chat.mensajes[chat.mensajes.length - 1];
-            
-            item.innerHTML = `
-                <div class="chat-info">
-                    <span class="chat-name">${chat.nombre} <small style="color:#999">+${id}</small></span>
-                    <span class="chat-last">${lastMsg ? lastMsg.texto : ''}</span>
-                    <div>
-                        ${tags.map(t => `<span class="tag-pill ${t.includes('VMA')?'tag-vma':'tag-body'}">${t}</span>`).join('')}
+    <script>
+        let chats = {}; let filter = 'all'; let selId = null;
+        async function load() {
+            const r = await fetch('/api/history');
+            chats = await r.json();
+            renderList();
+            if(selId) renderMsgs(selId);
+        }
+        function renderList() {
+            const container = document.getElementById('chat-items');
+            container.innerHTML = '';
+            Object.keys(chats).sort((a,b)=>chats[b].lastTs - chats[a].lastTs).forEach(id => {
+                const c = chats[id];
+                if(filter === 'vma' && !c.tags.includes('VENTA_VMA')) return;
+                if(filter === 'body' && !c.tags.includes('CITA_BODY')) return;
+                const div = document.createElement('div');
+                div.className = `item ${selId === id ? 'active' : ''}`;
+                div.onclick = () => { selId = id; renderMsgs(id); load(); };
+                div.innerHTML = `
+                    <strong>${c.nombre}</strong><br><small>${id}</small>
+                    ${c.unread > 0 ? '<div class="unread-dot"></div>' : ''}
+                    <div style="margin-top:5px">
+                        ${c.tags.map(t=> `<span class="tag ${t==='VENTA_VMA'?'tag-vma':'tag-body'}">${t}</span>`).join('')}
                     </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+        function renderMsgs(id) {
+            const c = chats[id];
+            document.getElementById('chat-head').innerText = c.nombre + " (+" + id + ")";
+            const mDiv = document.getElementById('msgs');
+            mDiv.innerHTML = c.mensajes.map(m => `
+                <div class="msg ${m.from}">
+                    ${m.texto}<br><small style="color:#999;font-size:9px">${m.hora}</small>
                 </div>
-                ${unread}
-            `;
-            list.appendChild(item);
-        });
-    }
-
-    function renderMessages(id) {
-        const chat = allChats[id];
-        const container = document.getElementById('messages');
-        const header = document.getElementById('chat-header');
-        
-        header.innerHTML = `Chat con ${chat.nombre} (+${id}) <button class="btn-delete" onclick="deleteChat('${id}')">Borrar Chat</button>`;
-        container.innerHTML = '';
-        
-        let lastDate = "";
-
-        chat.mensajes.forEach(m => {
-            // Manejo de fechas
-            const msgDate = new Date().toLocaleDateString(); // Simplificado para el ejemplo
-            if (msgDate !== lastDate) {
-                const divider = document.createElement('div');
-                divider.className = 'msg-date-divider';
-                divider.innerText = msgDate;
-                container.appendChild(divider);
-                lastDate = msgDate;
-            }
-
-            const div = document.createElement('div');
-            div.className = `msg ${m.from}`;
-            div.innerHTML = `
-                ${m.texto}
-                <span class="msg-time">${m.hora}</span>
-            `;
-            container.appendChild(div);
-        });
-        container.scrollTop = container.scrollHeight;
-    }
-
-    function setFilter(f) {
-        currentFilter = f;
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        event.target.classList.add('active');
-        renderChatList();
-    }
-
-    async function deleteChat(id) {
-        if (!confirm("¿Borrar este historial?")) return;
-        await fetch('/api/delete-bulk', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:123456') },
-            body: JSON.stringify({ ids: [id] })
-        });
-        currentChatId = null;
-        loadHistory();
-    }
-
-    document.getElementById('search').oninput = renderChatList;
-    setInterval(loadHistory, 3000);
-    loadHistory();
-</script>
+            `).join('');
+            mDiv.scrollTop = mDiv.scrollHeight;
+        }
+        function setF(f) { filter = f; document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderList(); }
+        setInterval(load, 3000); load();
+    </script>
 </body>
 </html>
