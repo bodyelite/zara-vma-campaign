@@ -14,43 +14,48 @@ const PORT = process.env.PORT || 3000;
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
 const AUTH_DIR = "/data/auth_info_baileys";
 
-let sock;
 let botActivo = false; 
 let webStatus = "⏸️ MODO OBSERVADOR";
 
-// FUNCIÓN MAESTRA DE ETIQUETADO
-function etiquetarChat(mensajes) {
+// LÓGICA DE CLASIFICACIÓN AGRESIVA
+function clasificarChat(chat) {
     let tags = [];
-    const textoCompleto = mensajes.map(m => m.texto.toLowerCase()).join(" ");
+    const mensajes = chat.mensajes || [];
+    const texto = mensajes.map(m => m.texto.toLowerCase()).join(" ");
     
-    if (textoCompleto.match(/talla|uniforme|colegio|precio|formal|pantal[oó]n|falda|polera|stock/)) {
+    // REGLA DE ORO: Si hay más de un mensaje, el cliente interactuó -> Pasa a VMA
+    if (mensajes.length > 1) {
         tags.push("VENTA_VMA");
     }
-    if (textoCompleto.match(/body|evaluaci[oó]n|cl[ií]nica|hifu|lipo|depilaci[oó]n|turno|agendar/)) {
+    
+    // Regla adicional para Body Elite
+    if (texto.includes("body") || texto.includes("evaluacion") || texto.includes("hifu")) {
         tags.push("CITA_BODY");
     }
-    return tags;
+    
+    return [...new Set(tags)]; // Evitar duplicados
 }
 
-// RUTA PARA FORZAR LA CLASIFICACIÓN DEL PASADO
 app.get('/limpiar-pestanas', (req, res) => {
     try {
         if (fs.existsSync(CHAT_HISTORY_FILE)) {
             let chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
             Object.keys(chats).forEach(id => {
-                chats[id].tags = etiquetarChat(chats[id].mensajes);
+                chats[id].tags = clasificarChat(chats[id]);
             });
             fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
-            res.send("<h1>✅ Pestañas clasificadas con éxito. Refresca el monitor.</h1>");
-        } else { res.send("No hay historial para clasificar."); }
+            res.send("<h1>✅ Pestañas Re-Calculadas por Interacción. Refresca el Monitor.</h1>");
+        } else { res.send("Sin historial."); }
     } catch (e) { res.status(500).send(e.message); }
 });
 
 app.get('/api/history', (req, res) => {
-    if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')));
-    else res.json({});
+    if (fs.existsSync(CHAT_HISTORY_FILE)) {
+        const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        res.json(chats);
+    } else res.json({});
 });
 
-app.get('/encender-zara', (req, res) => { botActivo = true; res.send("Despertando..."); });
 app.get('/monitor', (req, res) => res.sendFile(path.join(__dirname, 'public/monitor.html')));
-app.listen(PORT, () => { console.log("Servidor listo"); });
+app.get('/estado', (req, res) => res.send(`<h1>${webStatus}</h1>`));
+app.listen(PORT, () => { console.log("Servidor en línea"); });
