@@ -17,18 +17,28 @@ const STAFF_BODY = ["56983300262", "56937648536", "56955145504"];
 
 const PORT = process.env.PORT || 3000;
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "admin123";
-const LOG_FILE = "/data/pedidos_log.json"; // Archivo para el reporte en disco persistente
+const CHAT_HISTORY_FILE = "/data/historial_chats.json"; // Persistencia de chats
 
 let sock;
 
-// Función para registrar pedidos en el log
-function registrarEvento(tipo, data) {
-    let logs = [];
+// Función para registrar historial de chats en disco [cite: 2026-01-30]
+function registrarChat(jid, nombre, mensaje, esBot = false) {
+    let chats = {};
     try {
-        if (fs.existsSync(LOG_FILE)) logs = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
-        logs.push({ fecha: new Date().toLocaleString(), tipo, ...data });
-        fs.writeFileSync(LOG_FILE, JSON.stringify(logs, null, 2));
-    } catch (e) { console.error("Error logueando:", e); }
+        if (fs.existsSync(CHAT_HISTORY_FILE)) {
+            chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        }
+        if (!chats[jid]) chats[jid] = { nombre, mensajes: [] };
+        
+        chats[jid].mensajes.push({
+            hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+            texto: mensaje,
+            from: esBot ? 'Camila' : 'Cliente'
+        });
+        
+        if (chats[jid].mensajes.length > 30) chats[jid].mensajes.shift();
+        fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
+    } catch (e) { console.error("Error historial:", e); }
 }
 
 // Función para enviar alertas a WhatsApp [cite: 2026-01-09]
@@ -38,7 +48,6 @@ async function enviarAlerta(tipo, data) {
         ? `🚨 *NUEVA NOTA VMA*\n👤 ${data.nombre}\n📱 ${data.telefono}\n📅 Visita: ${data.fecha}`
         : `✨ *INTERÉS BODY ELITE*\n👤 ${data.nombre}\n📱 ${data.telefono}\n🎯 Evaluación Facial IA`;
 
-    registrarEvento(tipo, data);
     for (const num of numeros) {
         try {
             await sock.sendMessage(`${num}@s.whatsapp.net`, { text: mensaje });
@@ -46,42 +55,59 @@ async function enviarAlerta(tipo, data) {
     }
 }
 
-// === MONITOR WEB CON BOTÓN DE REPORTE === [cite: 2026-01-30]
+// === MONITOR CON VISTA DE CHATS EN VIVO === [cite: 2026-01-30]
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
         res.setHeader('WWW-Authenticate', 'Basic realm="Monitor VMA"');
         return res.status(401).send('Acceso denegado');
     }
+
+    let htmlChats = '<p style="text-align:center; color:#666;">Esperando nuevas conversaciones...</p>';
+    if (fs.existsSync(CHAT_HISTORY_FILE)) {
+        const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        htmlChats = Object.keys(chats).reverse().map(jid => `
+            <div style="background:white; border-radius:12px; padding:20px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.05); border-left:6px solid #0084ff;">
+                <h3 style="margin:0 0 10px 0; color:#1c1e21; display:flex; justify-content:space-between;">
+                    <span>👤 ${chats[jid].nombre}</span>
+                    <small style="color:#888; font-weight:normal;">${jid.split('@')[0]}</small>
+                </h3>
+                <div style="background:#f7f8fa; border-radius:8px; padding:15px; max-height:250px; overflow-y:auto; font-size:0.95em;">
+                    ${chats[jid].mensajes.map(m => `
+                        <div style="margin-bottom:10px; text-align:${m.from === 'Camila' ? 'right' : 'left'}">
+                            <span style="display:inline-block; padding:8px 12px; border-radius:15px; background:${m.from === 'Camila' ? '#0084ff' : '#e4e6eb'}; color:${m.from === 'Camila' ? 'white' : 'black'};">
+                                <small style="display:block; font-size:0.7em; opacity:0.8;">${m.hora} - ${m.from}</small>
+                                ${m.texto}
+                            </span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+    }
+
     res.send(`
         <html>
             <head>
-                <title>Monitor Camila</title>
+                <title>Consola Camila VMA</title>
+                <meta http-equiv="refresh" content="15">
                 <style>
-                    body { font-family: sans-serif; padding: 40px; background: #f0f2f5; }
-                    .card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
-                    h1 { color: #1c1e21; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-                    .btn { background: #0084ff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px; cursor: pointer; border: none; }
-                    .status { color: #42b72a; font-weight: bold; }
+                    body { font-family:-apple-system, sans-serif; background:#f0f2f5; padding:20px; color:#1c1e21; }
+                    .container { max-width:800px; margin:auto; }
+                    .header { text-align:center; margin-bottom:30px; }
                 </style>
             </head>
             <body>
-                <div class="card">
-                    <h1>📊 Panel Camila VMA</h1>
-                    <p class="status">● Sistema Conectado en Render Cloud</p>
-                    <p>📍 <b>Disco:</b> /data</p>
-                    <p>📩 <b>Alertas:</b> Activas para Staff VMA y Body Elite</p>
-                    <hr>
-                    <button class="btn" onclick="window.location.href='/download-report'">📥 Descargar Reporte de Pedidos</button>
+                <div class="container">
+                    <div class="header">
+                        <h1>💬 Conversaciones en Vivo</h1>
+                        <p>● Sistema Conectado en Disco /data</p>
+                    </div>
+                    ${htmlChats}
                 </div>
             </body>
         </html>
     `);
-});
-
-app.get('/download-report', (req, res) => {
-    if (fs.existsSync(LOG_FILE)) res.download(LOG_FILE);
-    else res.status(404).send("No hay pedidos registrados aún.");
 });
 
 async function connectToWhatsApp() {
@@ -121,11 +147,13 @@ async function connectToWhatsApp() {
         const userName = msg.pushName || "Cliente";
 
         if (text) {
+            registrarChat(jid, userName, text, false);
             const gptResponse = await chatWithGPT(text, jid);
             await sock.sendMessage(jid, { text: gptResponse });
+            registrarChat(jid, userName, gptResponse, true);
 
             if (gptResponse.includes("$")) {
-                await enviarAlerta('VMA', { nombre: userName, telefono: jid.split('@')[0], fecha: "Ver chat" });
+                await enviarAlerta('VMA', { nombre: userName, telefono: jid.split('@')[0], fecha: "Ver Monitor" });
             }
             if (gptResponse.toLowerCase().includes("body elite")) {
                 await enviarAlerta('BODY', { nombre: userName, telefono: jid.split('@')[0] });
