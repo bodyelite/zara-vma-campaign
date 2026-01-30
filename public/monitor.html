@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRM VMA & Body Elite</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; font-family: 'Inter', sans-serif; background: #f0f2f5; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* SIDEBAR */
+        .sidebar { width: 360px; background: #fff; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        
+        .header { padding: 15px; background: #008069; color: white; display: flex; flex-direction: column; gap: 10px; }
+        .header-top { display: flex; justify-content: space-between; align-items: center; }
+        .header h2 { margin: 0; font-size: 18px; }
+        .btn-excel { background: white; color: #008069; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; text-decoration: none; }
+        
+        .search-box { width: 95%; padding: 8px; border-radius: 5px; border: none; outline: none; font-size: 14px; }
+
+        .tabs { display: flex; background: #f0f2f5; padding: 0; }
+        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; font-weight: 600; color: #54656f; font-size: 14px; }
+        .tab.active { border-bottom: 3px solid #008069; color: #008069; background: white; }
+        .tab.body-tab.active { border-bottom: 3px solid #d32f2f; color: #d32f2f; }
+
+        .filters { padding: 10px; display: flex; gap: 8px; border-bottom: 1px solid #eee; overflow-x: auto; }
+        .filter-btn { padding: 5px 12px; border-radius: 15px; border: 1px solid #ddd; background: white; cursor: pointer; font-size: 12px; white-space: nowrap; }
+        .filter-btn.active { background: #e7fce3; border-color: #008069; color: #008069; font-weight: 600; }
+
+        .user-list { flex: 1; overflow-y: auto; }
+        .user-item { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; justify-content: space-between; align-items: flex-start; }
+        .user-item:hover { background: #f5f6f6; }
+        .user-item.active { background: #e9edef; }
+        
+        .user-info { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+        .user-row-1 { display: flex; justify-content: space-between; align-items: center; }
+        .user-name { font-weight: 600; color: #111b21; font-size: 15px; }
+        .user-time { font-size: 11px; color: #667781; }
+        
+        .user-preview { font-size: 13px; color: #54656f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+        
+        /* TAGS & INDICATORS */
+        .tags { display: flex; gap: 5px; margin-left: 8px; }
+        .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
+        .tag-compro { background: #dcf8c6; color: #075e54; } /* VMA Compró */
+        .tag-agendado { background: #fadbd8; color: #922b21; } /* Body Agendado */
+        
+        .red-dot { width: 10px; height: 10px; background: #25d366; border-radius: 50%; display: none; margin-left: auto; }
+        .unread .red-dot { display: block; background: #ff3b30; box-shadow: 0 0 4px rgba(255, 59, 48, 0.6); }
+
+        /* CHAT AREA */
+        .chat-area { flex: 1; display: flex; flex-direction: column; background: #efeae2; background-image: url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png"); }
+        .chat-header { padding: 10px 20px; background: #f0f2f5; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; height: 40px; }
+        .chat-messages { flex: 1; padding: 20px 40px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+        
+        .message { max-width: 65%; padding: 6px 10px; border-radius: 7.5px; font-size: 14px; line-height: 19px; position: relative; box-shadow: 0 1px 0.5px rgba(11,20,26,.13); }
+        
+        .message.cliente { align-self: flex-start; background: #fff; border-top-left-radius: 0; }
+        .message.zara { align-self: flex-end; background: #d9fdd3; border-top-right-radius: 0; }
+        
+        .msg-time { float: right; font-size: 11px; color: #667781; margin-top: 5px; margin-left: 10px; }
+
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #667781; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="header">
+            <div class="header-top">
+                <h2>CRM Campaña</h2>
+                <a href="/api/export-excel" class="btn-excel">📥 Descargar Excel</a>
+            </div>
+            <input type="text" id="searchInput" class="search-box" placeholder="🔍 Buscar por nombre o número..." onkeyup="renderUserList()">
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('VMA')">🏫 VMA (Todos)</div>
+            <div class="tab body-tab" onclick="switchTab('BODY')">💆‍♀️ BODY ELITE</div>
+        </div>
+
+        <div class="filters">
+            <button class="filter-btn active" onclick="setFilter('all', this)">Todos</button>
+            <button class="filter-btn" onclick="setFilter('unread', this)">🔴 Sin leer</button>
+            <button class="filter-btn" onclick="setFilter('action', this)">✅ Cierre/Agenda</button>
+        </div>
+
+        <div class="user-list" id="userList">
+            </div>
+    </div>
+
+    <div class="chat-area">
+        <div class="chat-header" id="chatHeader">
+            <h3>Selecciona un chat</h3>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="empty-state">
+                <h3>Monitor Zara</h3>
+                <p>Selecciona un chat para ver el historial en tiempo real.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allChats = {};
+        let currentTab = 'VMA'; 
+        let currentFilter = 'all'; 
+        let selectedPhone = null;
+
+        async function fetchHistory() {
+            try {
+                const response = await fetch('/api/history');
+                allChats = await response.json();
+                renderUserList();
+                if (selectedPhone) loadChat(selectedPhone);
+            } catch (error) {
+                console.error("Error cargando chats", error);
+            }
+        }
+        
+        setInterval(fetchHistory, 4000); // Refresco automático
+        fetchHistory();
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            if (tab === 'VMA') document.querySelector('.tabs .tab:nth-child(1)').classList.add('active');
+            else document.querySelector('.tabs .tab:nth-child(2)').classList.add('active');
+            renderUserList();
+        }
+
+        function setFilter(filter, btn) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderUserList();
+        }
+
+        // --- LÓGICA DE CLASIFICACIÓN ---
+        function analyzeUser(phone, data) {
+            const msgs = data.mensajes || [];
+            const lastMsg = msgs[msgs.length - 1];
+            
+            // Unir todo el texto para buscar palabras clave
+            const fullText = msgs.map(m => m.texto).join(" ").toLowerCase();
+            
+            // 1. Interés Body
+            const isBodyInterested = fullText.includes('body') || fullText.includes('evaluacion') || fullText.includes('lipo');
+
+            // 2. Etiquetas (Tags)
+            let tag = null;
+            if (currentTab === 'VMA') {
+                if (fullText.includes('retiro') || fullText.includes('agendado') || fullText.includes('miercoles') || fullText.includes('martes') || fullText.includes('lunes')) {
+                    tag = 'COMPRÓ';
+                }
+            } else {
+                if (fullText.includes('evaluacion') && (fullText.includes('agendado') || fullText.includes('listo'))) {
+                    tag = 'AGENDADO';
+                }
+            }
+
+            // 3. Sin leer (si el último es del cliente)
+            const unread = lastMsg && lastMsg.from === 'Cliente';
+
+            return { phone, name: data.nombre, isBodyInterested, tag, unread, lastMsg };
+        }
+
+        function renderUserList() {
+            const container = document.getElementById('userList');
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+            
+            // Convertir objeto a array y ordenar por fecha (lastTs)
+            let users = Object.keys(allChats).map(phone => {
+                const data = allChats[phone];
+                return { ...analyzeUser(phone, data), rawData: data };
+            });
+
+            // Ordenar: Más recientes primero
+            users.sort((a, b) => (b.rawData.lastTs || 0) - (a.rawData.lastTs || 0));
+
+            container.innerHTML = '';
+
+            users.forEach(u => {
+                // FILTROS
+                if (currentTab === 'BODY' && !u.isBodyInterested) return;
+                if (searchText && !u.name.toLowerCase().includes(searchText) && !u.phone.includes(searchText)) return;
+                if (currentFilter === 'unread' && !u.unread) return;
+                if (currentFilter === 'action' && !u.tag) return;
+
+                // RENDER
+                const div = document.createElement('div');
+                div.className = `user-item ${u.unread ? 'unread' : ''} ${selectedPhone === u.phone ? 'active' : ''}`;
+                div.onclick = () => selectUser(u.phone);
+
+                let tagHtml = u.tag ? `<span class="tag ${u.tag === 'COMPRÓ' ? 'tag-compro' : 'tag-agendado'}">${u.tag}</span>` : '';
+
+                div.innerHTML = `
+                    <div class="user-info">
+                        <div class="user-row-1">
+                            <span class="user-name">${u.name}</span>
+                            <span class="user-time">${u.lastMsg ? u.lastMsg.hora : ''}</span>
+                        </div>
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <span class="user-preview">${u.lastMsg ? u.lastMsg.texto : '...'}</span>
+                            <div class="tags">
+                                ${tagHtml}
+                                <div class="red-dot"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function selectUser(phone) {
+            selectedPhone = phone;
+            renderUserList(); // Actualizar visual active
+
+            const data = allChats[phone];
+            document.getElementById('chatHeader').innerHTML = `<h3>${data.nombre} (+${phone})</h3>`;
+            
+            // Marcar como leído en backend
+            fetch('/mark-read?id=' + phone);
+
+            const chatContainer = document.getElementById('chatMessages');
+            chatContainer.innerHTML = '';
+
+            data.mensajes.forEach(m => {
+                const div = document.createElement('div');
+                div.className = `message ${m.from === 'Zara' ? 'zara' : 'cliente'}`;
+                // Convertir saltos de línea a <br>
+                const content = m.texto.replace(/\n/g, '<br>');
+                div.innerHTML = `${content} <span class="msg-time">${m.hora}</span>`;
+                chatContainer.appendChild(div);
+            });
+            
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    </script>
+</body>
+</html>

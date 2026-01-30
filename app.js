@@ -3,11 +3,15 @@ const pino = require("pino");
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const ExcelJS = require('exceljs'); // NUEVO
 const { chatWithGPT } = require("./services/chatgpt");
 require("dotenv").config();
 
 const app = express();
 app.use(express.json());
+
+// Servir archivos estáticos (CSS, JS, Imagenes) de la carpeta public si los hubiera
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
@@ -16,7 +20,7 @@ const CLIENTES_FILE = path.join(__dirname, "clientes.csv");
 
 let sock;
 
-// Función para guardar metadatos (hora, unread, etc) [cite: 2026-01-30]
+// --- TU LÓGICA DE GUARDADO (INTACTA) ---
 function registrarChat(jid, nombre, mensaje, esBot = false) {
     let chats = {};
     try {
@@ -42,7 +46,8 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
              chats[fonoLimpio].unread = 0; 
         }
 
-        if (chats[fonoLimpio].mensajes.length > 50) chats[fonoLimpio].mensajes.shift();
+        // Mantenemos historial manejable (últimos 60 msjes)
+        if (chats[fonoLimpio].mensajes.length > 60) chats[fonoLimpio].mensajes.shift();
         
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
     } catch (e) { console.error("Error guardando chat:", e); }
@@ -60,137 +65,78 @@ app.get('/mark-read', (req, res) => {
     res.json({ success: true });
 });
 
+// --- NUEVAS RUTAS PARA EL MONITOR CRM ---
+
+// 1. API: Entregar datos al frontend
+app.get('/api/history', (req, res) => {
+    if (fs.existsSync(CHAT_HISTORY_FILE)) {
+        const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        res.json(chats);
+    } else {
+        res.json({});
+    }
+});
+
+// 2. EXCEL: Descargar reporte
+app.get('/api/export-excel', async (req, res) => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Chats VMA-BODY');
+
+    sheet.columns = [
+        { header: 'Cliente (Fono)', key: 'user', width: 15 },
+        { header: 'Nombre', key: 'name', width: 20 },
+        { header: 'Hora', key: 'time', width: 10 },
+        { header: 'Remitente', key: 'from', width: 10 },
+        { header: 'Mensaje', key: 'text', width: 50 },
+        { header: 'Interés Body', key: 'interest', width: 10 },
+        { header: 'Estado', key: 'status', width: 15 }
+    ];
+
+    if (fs.existsSync(CHAT_HISTORY_FILE)) {
+        const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
+        
+        Object.keys(chats).forEach(fono => {
+            const chat = chats[fono];
+            const msgs = chat.mensajes || [];
+            
+            // Análisis simple para el Excel
+            const fullText = msgs.map(m => m.texto).join(" ").toLowerCase();
+            let interestBody = (fullText.includes("body") || fullText.includes("evaluacion")) ? "SI" : "NO";
+            let status = (fullText.includes("agendado") || fullText.includes("retiro")) ? "Cierre" : "Consulta";
+
+            msgs.forEach(m => {
+                sheet.addRow({
+                    user: fono,
+                    name: chat.nombre,
+                    time: m.hora,
+                    from: m.from,
+                    text: m.texto,
+                    interest: interestBody,
+                    status: status
+                });
+            });
+        });
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=Reporte_Campaña.xlsx');
+
+    await workbook.xlsx.write(res);
+    res.end();
+});
+
+// 3. MONITOR: Servir el nuevo HTML (Protegido)
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
         res.setHeader('WWW-Authenticate', 'Basic realm="Monitor"');
         return res.status(401).send('Acceso denegado');
     }
-
-    const chats = fs.existsSync(CHAT_HISTORY_FILE) ? JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')) : {};
-    
-    // Ordenar chats: más nuevos primero
-    const sortedChats = Object.keys(chats).sort((a, b) => chats[b].lastTs - chats[a].lastTs);
-
-    // Generamos el HTML usando template literals anidados correctamente
-    res.send(`
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-        <meta charset="UTF-8">
-        <title>Zara Monitor</title>
-        <style>
-            body { margin:0; font-family:'Segoe UI',Helvetica,Arial,sans-serif; background:#d1d7db; height:100vh; display:flex; overflow:hidden; }
-            #sidebar { width:30%; min-width:300px; background:#fff; border-right:1px solid #d1d7db; display:flex; flex-direction:column; }
-            .header { background:#f0f2f5; padding:10px 16px; height:60px; display:flex; align-items:center; border-bottom:1px solid #d1d7db; font-weight:bold; color:#54656f; flex-shrink:0; }
-            #chat-list { flex:1; overflow-y:auto; }
-            .chat-item { display:flex; align-items:center; padding:12px 15px; cursor:pointer; border-bottom:1px solid #f0f2f5; position:relative; }
-            .chat-item:hover { background:#f5f6f6; }
-            .chat-item.active { background:#f0f2f5; }
-            .avatar { width:45px; height:45px; background:#dfe5e7; border-radius:50%; margin-right:15px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; }
-            .info { flex:1; overflow:hidden; }
-            .top-row { display:flex; justify-content:space-between; margin-bottom:3px; }
-            .name { font-size:16px; color:#111b21; font-weight:400; }
-            .date { font-size:12px; color:#667781; }
-            .preview { font-size:13px; color:#667781; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-            .badge { background:#25d366; color:white; font-size:12px; font-weight:bold; padding:2px 6px; border-radius:10px; min-width:15px; text-align:center; }
-            #main { flex:1; display:flex; flex-direction:column; background:#efeae2; position:relative; }
-            #main-header { background:#f0f2f5; padding:10px 16px; height:60px; display:flex; align-items:center; border-bottom:1px solid #d1d7db; flex-shrink:0; }
-            #messages-area { flex:1; padding:20px 40px; overflow-y:auto; display:flex; flex-direction:column; background-image: url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png"); background-repeat: repeat; }
-            .bubble { max-width:65%; padding:6px 7px 8px 9px; margin-bottom:8px; border-radius:7.5px; position:relative; font-size:14.2px; line-height:19px; color:#111b21; box-shadow:0 1px 0.5px rgba(11,20,26,.13); }
-            .bubble.zara { align-self:flex-end; background:#d9fdd3; }
-            .bubble.cliente { align-self:flex-start; background:#fff; }
-            .bubble-time { float:right; margin-left:15px; font-size:11px; color:#667781; margin-top:5px; }
-            .welcome-screen { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:#667781; text-align:center; }
-        </style>
-    </head>
-    <body>
-        <div id="sidebar">
-            <div class="header">Chats (${sortedChats.length})</div>
-            <div id="chat-list">
-                ${sortedChats.map(id => {
-                    const c = chats[id];
-                    const lastMsg = c.mensajes[c.mensajes.length - 1] || {};
-                    const unreadHtml = c.unread > 0 ? `<div class="badge">${c.unread}</div>` : '';
-                    return `
-                    <div class="chat-item" onclick="loadChat('${id}')" id="item-${id}">
-                        <div class="avatar">👤</div>
-                        <div class="info">
-                            <div class="top-row">
-                                <span class="name">${c.nombre}</span>
-                                <span class="date">${lastMsg.hora || ''}</span>
-                            </div>
-                            <div class="top-row">
-                                <span class="preview">${lastMsg.texto ? lastMsg.texto.substring(0, 30) + '...' : ''}</span>
-                                ${unreadHtml}
-                            </div>
-                        </div>
-                    </div>`;
-                }).join('')}
-            </div>
-        </div>
-
-        <div id="main">
-            <div id="main-header" style="display:none;">
-                <div class="avatar">👤</div>
-                <div>
-                    <div class="name" id="header-name">Nombre</div>
-                    <div class="date" id="header-phone">Numero</div>
-                </div>
-            </div>
-            <div id="messages-area">
-                <div class="welcome-screen">
-                    <h2>Monitor Zara VMA</h2>
-                    <p>Selecciona un chat para ver la conversación.</p>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            const allChats = ${JSON.stringify(chats)};
-            let activeChatId = localStorage.getItem('zaraActiveChat');
-
-            function loadChat(id) {
-                activeChatId = id;
-                localStorage.setItem('zaraActiveChat', id);
-                
-                const chat = allChats[id];
-                if (!chat) return;
-
-                document.getElementById('item-'+id).querySelector('.badge')?.remove();
-                fetch('/mark-read?id=' + id);
-
-                document.getElementById('main-header').style.display = 'flex';
-                document.getElementById('header-name').innerText = chat.nombre;
-                document.getElementById('header-phone').innerText = '+ ' + id;
-
-                const area = document.getElementById('messages-area');
-                area.innerHTML = ''; 
-
-                chat.mensajes.forEach(m => {
-                    const div = document.createElement('div');
-                    div.className = 'bubble ' + (m.from === 'Zara' ? 'zara' : 'cliente');
-                    div.innerHTML = \`\${m.texto}<span class="bubble-time">\${m.hora}</span>\`;
-                    area.appendChild(div);
-                });
-
-                area.scrollTop = area.scrollHeight;
-                document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-                document.getElementById('item-'+id)?.classList.add('active');
-            }
-
-            setTimeout(() => location.reload(), 10000);
-
-            window.onload = () => {
-                if (activeChatId && allChats[activeChatId]) {
-                    loadChat(activeChatId);
-                }
-            };
-        </script>
-    </body>
-    </html>
-    `);
+    // Servimos el archivo externo en lugar de tener el HTML pegado aquí
+    res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
+
+// --- ENVIOS MASIVOS Y CONEXIÓN (INTACTO) ---
 
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: WhatsApp Desconectado");
