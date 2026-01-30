@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRM VMA & Body Elite</title>
+    <title>CRM Campaña VMA</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
         body { margin: 0; font-family: 'Inter', sans-serif; background: #f0f2f5; display: flex; height: 100vh; overflow: hidden; }
@@ -36,16 +36,17 @@
         .user-row-1 { display: flex; justify-content: space-between; align-items: center; }
         .user-name { font-weight: 600; color: #111b21; font-size: 15px; }
         .user-time { font-size: 11px; color: #667781; }
+        .user-phone { font-size: 11px; color: #888; margin-top: -2px; }
         
-        .user-preview { font-size: 13px; color: #54656f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+        .user-preview { font-size: 13px; color: #54656f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
         
         /* TAGS & INDICATORS */
-        .tags { display: flex; gap: 5px; margin-left: 8px; }
+        .tags { display: flex; gap: 5px; margin-left: 8px; align-items: center; }
         .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
         .tag-compro { background: #dcf8c6; color: #075e54; } /* VMA Compró */
         .tag-agendado { background: #fadbd8; color: #922b21; } /* Body Agendado */
         
-        .red-dot { width: 10px; height: 10px; background: #25d366; border-radius: 50%; display: none; margin-left: auto; }
+        .red-dot { width: 10px; height: 10px; background: #25d366; border-radius: 50%; display: none; margin-left: 5px; }
         .unread .red-dot { display: block; background: #ff3b30; box-shadow: 0 0 4px rgba(255, 59, 48, 0.6); }
 
         /* CHAT AREA */
@@ -118,7 +119,7 @@
             }
         }
         
-        setInterval(fetchHistory, 4000); // Refresco automático
+        setInterval(fetchHistory, 4000); 
         fetchHistory();
 
         function switchTab(tab) {
@@ -136,6 +137,19 @@
             renderUserList();
         }
 
+        // --- FORMATO DE NUMERO ---
+        function formatPhone(phone) {
+            // Si es un ID técnico largo o raro, lo limpiamos un poco
+            let clean = phone.replace('@s.whatsapp.net', '');
+            
+            // Si es chileno (569...)
+            if (clean.startsWith('569') && clean.length >= 11) {
+                return `+56 9 ${clean.substring(3, 7)} ${clean.substring(7)}`;
+            }
+            // Retorno genérico limpio
+            return `+${clean}`;
+        }
+
         // --- LÓGICA DE CLASIFICACIÓN ---
         function analyzeUser(phone, data) {
             const msgs = data.mensajes || [];
@@ -144,22 +158,30 @@
             // Unir todo el texto para buscar palabras clave
             const fullText = msgs.map(m => m.texto).join(" ").toLowerCase();
             
-            // 1. Interés Body
-            const isBodyInterested = fullText.includes('body') || fullText.includes('evaluacion') || fullText.includes('lipo');
+            // 1. Interés Body (Lógica Ampliada)
+            // Si menciona body elite, evaluacion, lipo O SI YA AGENDÓ (para que aparezca en la pestaña)
+            const isBodyInterested = fullText.includes('body') || 
+                                     fullText.includes('evaluacion') || 
+                                     fullText.includes('lipo') ||
+                                     fullText.includes('tratamiento') ||
+                                     (fullText.includes('agendado') && fullText.includes('evaluacion'));
 
-            // 2. Etiquetas (Tags)
+            // 2. Etiquetas (Tags) por Pestaña
             let tag = null;
             if (currentTab === 'VMA') {
                 if (fullText.includes('retiro') || fullText.includes('agendado') || fullText.includes('miercoles') || fullText.includes('martes') || fullText.includes('lunes')) {
                     tag = 'COMPRÓ';
                 }
             } else {
+                // Lógica BODY ELITE:
+                // Si el chat tiene "agendado" y habla de "evaluacion" o "body", tiene la etiqueta.
+                // Incluso si fue el bot quien dijo "He agendado..."
                 if (fullText.includes('evaluacion') && (fullText.includes('agendado') || fullText.includes('listo'))) {
                     tag = 'AGENDADO';
                 }
             }
 
-            // 3. Sin leer (si el último es del cliente)
+            // 3. Sin leer
             const unread = lastMsg && lastMsg.from === 'Cliente';
 
             return { phone, name: data.nombre, isBodyInterested, tag, unread, lastMsg };
@@ -169,7 +191,6 @@
             const container = document.getElementById('userList');
             const searchText = document.getElementById('searchInput').value.toLowerCase();
             
-            // Convertir objeto a array y ordenar por fecha (lastTs)
             let users = Object.keys(allChats).map(phone => {
                 const data = allChats[phone];
                 return { ...analyzeUser(phone, data), rawData: data };
@@ -183,14 +204,19 @@
             users.forEach(u => {
                 // FILTROS
                 if (currentTab === 'BODY' && !u.isBodyInterested) return;
+                
+                const formattedPhone = formatPhone(u.phone);
+                
+                // Buscador: busca por nombre o por numero formateado
                 if (searchText && !u.name.toLowerCase().includes(searchText) && !u.phone.includes(searchText)) return;
+                
                 if (currentFilter === 'unread' && !u.unread) return;
                 if (currentFilter === 'action' && !u.tag) return;
 
                 // RENDER
                 const div = document.createElement('div');
                 div.className = `user-item ${u.unread ? 'unread' : ''} ${selectedPhone === u.phone ? 'active' : ''}`;
-                div.onclick = () => selectUser(u.phone);
+                div.onclick = () => selectUser(u.phone, formattedPhone);
 
                 let tagHtml = u.tag ? `<span class="tag ${u.tag === 'COMPRÓ' ? 'tag-compro' : 'tag-agendado'}">${u.tag}</span>` : '';
 
@@ -200,7 +226,8 @@
                             <span class="user-name">${u.name}</span>
                             <span class="user-time">${u.lastMsg ? u.lastMsg.hora : ''}</span>
                         </div>
-                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <span class="user-phone">${formattedPhone}</span>
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px;">
                             <span class="user-preview">${u.lastMsg ? u.lastMsg.texto : '...'}</span>
                             <div class="tags">
                                 ${tagHtml}
@@ -213,14 +240,18 @@
             });
         }
 
-        function selectUser(phone) {
+        function selectUser(phone, formattedPhone) {
             selectedPhone = phone;
-            renderUserList(); // Actualizar visual active
+            renderUserList(); 
 
             const data = allChats[phone];
-            document.getElementById('chatHeader').innerHTML = `<h3>${data.nombre} (+${phone})</h3>`;
+            document.getElementById('chatHeader').innerHTML = `
+                <div>
+                    <h3 style="margin:0;">${data.nombre}</h3>
+                    <small style="color:#666;">${formattedPhone}</small>
+                </div>
+            `;
             
-            // Marcar como leído en backend
             fetch('/mark-read?id=' + phone);
 
             const chatContainer = document.getElementById('chatMessages');
@@ -229,7 +260,6 @@
             data.mensajes.forEach(m => {
                 const div = document.createElement('div');
                 div.className = `message ${m.from === 'Zara' ? 'zara' : 'cliente'}`;
-                // Convertir saltos de línea a <br>
                 const content = m.texto.replace(/\n/g, '<br>');
                 div.innerHTML = `${content} <span class="msg-time">${m.hora}</span>`;
                 chatContainer.appendChild(div);
