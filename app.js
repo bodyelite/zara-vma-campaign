@@ -25,35 +25,38 @@ let webStatus = "⏳ Iniciando...";
 let webCode = "";
 let qrTimeout = null;
 
-// EQUIPOS ALERTA
-const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
+// EQUIPOS ALERTA (TE AGREGUÉ A TI EN TODOS PARA PRUEBAS)
+// Tu número: 56937648536
+const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net", "56937648536@s.whatsapp.net"]; 
 const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", "56937648536@s.whatsapp.net"];
 
-// --- FUNCIÓN MAESTRA DE LIMPIEZA DE NÚMEROS ---
-// Esta función elimina cualquier basura (+, espacios, ids raros) y deja solo el teléfono limpio
+// --- FUNCIÓN LIMPIEZA ---
 function limpiarNumero(jid) {
     if (!jid) return "";
-    // 1. Quitamos dominios de WhatsApp
     let temp = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
-    // 2. Dejamos SOLO dígitos numéricos (borra +, -, espacios)
     return temp.replace(/\D/g, ''); 
 }
 
-// --- ALERTAS ---
+// --- ALERTAS CON LOGS ---
 async function enviarAlerta(grupo, mensaje) {
     if (!sock) return;
     for (const numero of grupo) {
-        try { await delay(2000); await sock.sendMessage(numero, { text: mensaje }); } catch (e) {}
+        try { 
+            await delay(1000); // 1 segundo entre alertas
+            await sock.sendMessage(numero, { text: mensaje }); 
+            console.log(`🔔 Alerta enviada a ${numero}`);
+        } catch (e) {
+            console.error(`❌ Error enviando alerta a ${numero}:`, e.message);
+        }
     }
 }
 
-// --- REGISTRO UNIFICADO ---
+// --- REGISTRO ---
 function registrarChat(rawJid, nombre, mensaje, esBot = false) {
     try {
         let chats = {};
         if (fs.existsSync(CHAT_HISTORY_FILE)) chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         
-        // APLICAMOS LA LIMPIEZA AQUÍ PARA UNIFICAR TODO
         const fonoUnico = limpiarNumero(rawJid);
         
         if (!chats[fonoUnico]) chats[fonoUnico] = { nombre, mensajes: [], unread: 0, lastTs: 0 };
@@ -73,7 +76,7 @@ function registrarChat(rawJid, nombre, mensaje, esBot = false) {
     } catch (e) { return false; }
 }
 
-// --- CONEXIÓN WHATSAPP ---
+// --- CONEXIÓN ---
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     
@@ -129,8 +132,6 @@ async function connectToWhatsApp() {
             if (text) {
                 console.log(`📩 Msg: ${text.substring(0, 10)}...`);
                 let realJid = msg.key.remoteJid;
-                
-                // Normalización extra por si acaso
                 try { 
                     if (typeof jidNormalizedUser === 'function') {
                         const normalized = jidNormalizedUser(realJid);
@@ -138,13 +139,11 @@ async function connectToWhatsApp() {
                     }
                 } catch(e) {}
 
-                // Extracción de nombre
                 const nombre = msg.pushName || "Cliente";
-                
-                // REGISTRO CON LIMPIEZA
                 const esNuevo = registrarChat(realJid, nombre, text, false);
                 const fonoClean = limpiarNumero(realJid);
 
+                // ALERTA NUEVO CHAT
                 if (esNuevo) await enviarAlerta(STAFF_VMA, `🔔 NUEVO: ${nombre} (+${fonoClean})`);
 
                 try {
@@ -152,9 +151,20 @@ async function connectToWhatsApp() {
                     await sock.sendMessage(msg.key.remoteJid, { text: response });
                     registrarChat(realJid, nombre, response, true);
                     
+                    // ANÁLISIS DE RESPUESTA (Alertas más flexibles)
                     const botTxt = response.toLowerCase();
-                    if (botTxt.includes("agendado") && botTxt.includes("body")) await enviarAlerta(STAFF_BODY, `📅 AGENDADO BODY: ${nombre} (+${fonoClean})`);
-                    if (botTxt.includes("resumen final")) await enviarAlerta(STAFF_VMA, `✅ PEDIDO OK: ${nombre} (+${fonoClean})`);
+                    
+                    // Si dice agendado, agenda, reserva o reservar y menciona body (o contexto estética)
+                    if ((botTxt.includes("agendado") || botTxt.includes("agenda") || botTxt.includes("reserva")) && 
+                        (botTxt.includes("body") || botTxt.includes("evaluacion") || botTxt.includes("tratamiento"))) {
+                        await enviarAlerta(STAFF_BODY, `📅 OPORTUNIDAD BODY: ${nombre} (+${fonoClean})`);
+                    }
+                    
+                    // Si confirma pedido o resumen
+                    if (botTxt.includes("resumen") || botTxt.includes("pedido") || botTxt.includes("total")) {
+                         await enviarAlerta(STAFF_VMA, `✅ INTERÉS VMA: ${nombre} (+${fonoClean})`);
+                    }
+
                 } catch (gptError) { console.error("Error IA:", gptError); }
             }
         } catch (e) { console.error("Upsert error:", e.message); }
@@ -165,13 +175,11 @@ async function connectToWhatsApp() {
 app.get('/estado', (req, res) => {
     res.send(`<html><head><meta http-equiv="refresh" content="3"><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#f4f4f9}.card{background:white;padding:40px;border-radius:15px;box-shadow:0 4px 15px rgba(0,0,0,0.1);display:inline-block}.code{font-size:40px;background:#e8f5e9;padding:15px;margin:20px 0;color:#2e7d32;font-family:monospace;border:2px dashed green}.online{color:green}.offline{color:red}.btn{background:#c62828;color:white;padding:10px;text-decoration:none;border-radius:5px}</style></head><body><div class="card"><h1>🤖 Estado Zara</h1><h2 class="${webStatus.includes('ONLINE')?'online':'offline'}">${webStatus}</h2>${webCode?`<div class="code">${webCode}</div><p>Vincular en WhatsApp</p>`:''}${webStatus.includes('ROTA')?`<a href="/reset" class="btn">♻️ REINICIAR</a>`:''}</div></body></html>`);
 });
-
 app.get('/reset', (req, res) => {
     if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
     res.send("<h1>♻️ Reiniciando...</h1><script>setTimeout(()=>window.location='/estado',5000)</script>");
     setTimeout(() => process.exit(0), 1000);
 });
-
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
@@ -180,7 +188,6 @@ app.get('/monitor', (req, res) => {
     }
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
-
 app.get('/api/history', (req, res) => { if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'))); else res.json({}); });
 
 app.get('/iniciar-envio', async (req, res) => {
@@ -191,10 +198,7 @@ app.get('/iniciar-envio', async (req, res) => {
     for (let i = 1; i < filas.length; i++) {
         const linea = filas[i];
         const [fono, nombre] = linea.split(',');
-        
-        // APLICAMOS LIMPIEZA TAMBIÉN AQUÍ
         const fonoClean = limpiarNumero(fono);
-        
         if (fonoClean.length > 8) {
             const jid = fonoClean + "@s.whatsapp.net";
             const msg = `Hola ${nombre.trim()}, soy Camila de Uniformes VMA. Te escribo para enfrentar a tiempo al fantasma de marzo! ¿Te ayudo con los uniformes?`;
