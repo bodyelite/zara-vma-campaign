@@ -3,236 +3,169 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRM Zara</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>Monitor Zara V2.0 🚀</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #e5ddd5; height: 100vh; display: flex; overflow: hidden; }
+        :root { --primary: #25d366; --dark: #121b22; --light: #f0f2f5; --accent: #00a884; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--light); }
         
-        /* SIDEBAR ESTILO CRM */
-        #sidebar { width: 400px; background: white; display: flex; flex-direction: column; border-right: 1px solid #ccc; }
-        
-        .crm-header { background: #075e54; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
-        .crm-tabs { display: flex; background: #f0f2f5; border-bottom: 1px solid #ddd; }
-        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; font-size: 13px; font-weight: bold; color: #54656f; border-bottom: 3px solid transparent; }
-        .tab.active { color: #00a884; border-bottom: 3px solid #00a884; background: white; }
-        .tab:hover { background: #e9edef; }
-
-        .toolbar { padding: 10px; background: #f0f2f5; display: flex; gap: 10px; border-bottom: 1px solid #ddd; align-items: center; }
-        .btn-bulk { background: #d32f2f; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; display: none; }
+        /* Sidebar */
+        #sidebar { width: 350px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .header { padding: 15px; background: var(--light); border-bottom: 1px solid #ddd; }
+        .tabs { display: flex; gap: 5px; padding: 10px; background: white; }
+        .tab-btn { flex: 1; padding: 8px; border: none; background: #eee; border-radius: 5px; cursor: pointer; font-size: 12px; }
+        .tab-btn.active { background: var(--primary); color: white; font-weight: bold; }
         
         #chat-list { flex: 1; overflow-y: auto; }
-        .chat-item { display: flex; padding: 12px; border-bottom: 1px solid #f0f2f5; cursor: pointer; align-items: center; position: relative; }
-        .chat-item:hover { background: #f5f6f6; }
-        .chat-item.active { background: #e9edef; }
+        .chat-item { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; position: relative; }
+        .chat-item:hover { background: #f9f9f9; }
+        .chat-item.active { background: #ebebeb; border-left: 4px solid var(--primary); }
+        .chat-info { flex: 1; }
+        .chat-name { font-weight: bold; display: block; margin-bottom: 3px; }
+        .chat-last { font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
         
-        .avatar { width: 45px; height: 45px; background: #dfe3e5; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; color: white; margin-right: 10px; }
-        .chat-info { flex: 1; min-width: 0; }
-        .chat-name { font-weight: bold; color: #111b21; font-size: 16px; margin-bottom: 3px; display: flex; justify-content: space-between; }
-        .chat-last-msg { color: #667781; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .chat-check { margin-right: 10px; transform: scale(1.2); cursor: pointer; }
+        .badge-unread { background: #25d366; color: white; border-radius: 50%; padding: 2px 7px; font-size: 11px; font-weight: bold; }
+        .tag-pill { font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 5px; }
+        .tag-vma { background: #dcf8c6; color: #075e54; }
+        .tag-body { background: #e1f5fe; color: #0277bd; }
 
-        /* TAGS / ESTADOS */
-        .badges { display: flex; gap: 5px; margin-top: 5px; }
-        .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: white; }
-        .badge-vma { background: #00a884; } /* Verde WhatsApp */
-        .badge-body { background: #9c27b0; } /* Morado Estética */
-        .badge-new { background: #2196f3; } /* Azul Nuevo */
+        /* Main Chat */
+        #chat-main { flex: 1; display: flex; flex-direction: column; background: #efeae2; }
+        #chat-header { padding: 15px; background: white; border-bottom: 1px solid #ddd; font-weight: bold; }
+        #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .msg { max-width: 70%; padding: 10px 15px; border-radius: 8px; font-size: 14px; line-height: 1.4; position: relative; }
+        .msg.Cliente { align-self: flex-start; background: white; border-radius: 0 8px 8px 8px; }
+        .msg.Zara { align-self: flex-end; background: #dcf8c6; border-radius: 8px 0 8px 8px; }
+        .msg-time { font-size: 10px; color: #999; margin-top: 5px; display: block; text-align: right; }
+        .msg-date-divider { align-self: center; background: #e1f3fb; padding: 4px 12px; border-radius: 5px; font-size: 11px; color: #555; margin: 10px 0; }
 
-        /* MAIN CHAT */
-        #main { flex: 1; display: flex; flex-direction: column; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); }
-        #chat-header { background: #f0f2f5; padding: 10px 20px; border-left: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; height: 60px; }
-        .wa-btn { background: #25d366; color: white; padding: 8px 15px; border-radius: 20px; text-decoration: none; font-weight: bold; display: flex; gap: 5px; align-items: center; }
-        
-        #messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-        .msg { max-width: 65%; padding: 8px 12px; border-radius: 7.5px; font-size: 14px; position: relative; box-shadow: 0 1px 0.5px rgba(0,0,0,0.13); }
-        .msg.cliente { background: white; align-self: flex-start; border-top-left-radius: 0; }
-        .msg.zara { background: #d9fdd3; align-self: flex-end; border-top-right-radius: 0; }
-        .time { font-size: 10px; color: #667781; float: right; margin-left: 10px; margin-top: 3px; }
+        .btn-delete { background: #ff5252; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; float: right; font-size: 11px; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
-    <div class="crm-header">
-        <span><i class="fas fa-robot"></i> CRM Zara</span>
-        <small id="last-update" style="opacity:0.8">Actualizado</small>
+    <div class="header">
+        <h3>Zara Monitor 🤖</h3>
+        <input type="text" id="search" placeholder="Buscar nombre o fono..." style="width:100%; padding:8px; border-radius:5px; border:1px solid #ddd;">
     </div>
-    
-    <div class="crm-tabs">
-        <div class="tab active" onclick="setFilter('all')">TODOS</div>
-        <div class="tab" onclick="setFilter('vma')">VMA 👕</div>
-        <div class="tab" onclick="setFilter('body')">BODY 💆‍♀️</div>
+    <div class="tabs">
+        <button class="tab-btn active" onclick="setFilter('all')">Todos</button>
+        <button class="tab-btn" onclick="setFilter('vma')">VMA</button>
+        <button class="tab-btn" onclick="setFilter('body')">Body</button>
     </div>
-
-    <div class="toolbar">
-        <input type="checkbox" onchange="toggleSelectAll(this)" title="Seleccionar todos">
-        <span style="font-size:12px; color:#666;">Selección</span>
-        <button id="btn-delete" class="btn-bulk" onclick="deleteSelected()"><i class="fas fa-trash"></i> BORRAR (<span id="count-sel">0</span>)</button>
-    </div>
-
     <div id="chat-list"></div>
 </div>
 
-<div id="main">
-    <div id="empty-view" style="display:flex; justify-content:center; align-items:center; height:100%; color:#54656f; background:#f0f2f5;">
-        <div><i class="fas fa-comments" style="font-size:40px; margin-bottom:10px;"></i><br>Selecciona un chat</div>
-    </div>
-    <div id="chat-view" style="display:none; height:100%; flex-direction:column;">
-        <div id="chat-header">
-            <div style="display:flex; align-items:center; gap:10px;">
-                <div class="avatar" style="background:#00a884;"><i class="fas fa-user"></i></div>
-                <div>
-                    <h3 id="h-name" style="margin:0; font-size:16px;">Nombre</h3>
-                    <span id="h-phone" style="font-size:12px; color:#54656f;">+569...</span>
-                </div>
-            </div>
-            <a href="#" id="wa-link" target="_blank" class="wa-btn"><i class="fab fa-whatsapp"></i> Abrir Chat</a>
-        </div>
-        <div id="messages"></div>
-    </div>
+<div id="chat-main">
+    <div id="chat-header">Selecciona un chat para ver la conversación</div>
+    <div id="messages"></div>
 </div>
 
 <script>
     let allChats = {};
     let currentFilter = 'all';
-    let selectedIds = new Set();
     let currentChatId = null;
 
-    async function loadData() {
+    async function loadHistory() {
         try {
-            const res = await fetch('/api/history', { headers: { 'Authorization': 'Basic ' + btoa('admin:123456') } });
-            if(res.status===401) return;
+            const res = await fetch('/api/history');
             allChats = await res.json();
-            renderList();
-            if(currentChatId && allChats[currentChatId]) renderMessages(currentChatId);
-            document.getElementById('last-update').innerText = new Date().toLocaleTimeString();
-        } catch(e) {}
+            renderChatList();
+            if (currentChatId) renderMessages(currentChatId);
+        } catch (e) { console.error("Error cargando historial"); }
     }
 
-    function setFilter(type) {
-        currentFilter = type;
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        event.target.classList.add('active');
-        renderList();
-    }
+    function renderChatList() {
+        const list = document.getElementById('chat-list');
+        const search = document.getElementById('search').value.toLowerCase();
+        list.innerHTML = '';
 
-    function toggleSelect(id) {
-        if(selectedIds.has(id)) selectedIds.delete(id);
-        else selectedIds.add(id);
-        updateBulkUI();
-    }
+        // Ordenar por último mensaje (descendente)
+        const sortedIds = Object.keys(allChats).sort((a, b) => allChats[b].lastTs - allChats[a].lastTs);
 
-    function toggleSelectAll(source) {
-        const visibleIds = getFilteredIds();
-        if(source.checked) visibleIds.forEach(id => selectedIds.add(id));
-        else selectedIds.clear();
-        renderList(); // Re-render checks
-        updateBulkUI();
-    }
-
-    function updateBulkUI() {
-        const btn = document.getElementById('btn-delete');
-        const count = document.getElementById('count-sel');
-        if(selectedIds.size > 0) {
-            btn.style.display = 'block';
-            count.innerText = selectedIds.size;
-        } else {
-            btn.style.display = 'none';
-        }
-    }
-
-    async function deleteSelected() {
-        if(!confirm(`¿Borrar ${selectedIds.size} chats seleccionados?`)) return;
-        await fetch('/api/delete-bulk', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': 'Basic ' + btoa('admin:123456') 
-            },
-            body: JSON.stringify({ ids: Array.from(selectedIds) })
-        });
-        selectedIds.clear();
-        loadData();
-    }
-
-    function getFilteredIds() {
-        return Object.keys(allChats).filter(id => {
+        sortedIds.forEach(id => {
             const chat = allChats[id];
             const tags = chat.tags || [];
-            if(currentFilter === 'all') return true;
-            if(currentFilter === 'vma') return tags.some(t => t.includes('VMA'));
-            if(currentFilter === 'body') return tags.some(t => t.includes('BODY'));
-            return false;
-        }).sort((a,b) => allChats[b].lastTs - allChats[a].lastTs);
-    }
-
-    function renderList() {
-        const list = document.getElementById('chat-list');
-        list.innerHTML = '';
-        const ids = getFilteredIds();
-
-        ids.forEach(id => {
-            const chat = allChats[id];
-            const lastMsg = chat.mensajes[chat.mensajes.length-1] || {};
-            const isSel = selectedIds.has(id);
             
-            // Generar Badges
-            let badgesHtml = '';
-            if(chat.tags) {
-                if(chat.tags.includes('VMA_VENTA')) badgesHtml += '<span class="badge badge-vma">VENTA</span>';
-                if(chat.tags.includes('BODY_CITA')) badgesHtml += '<span class="badge badge-body">CITA</span>';
-                if(chat.tags.includes('BODY_INTERES')) badgesHtml += '<span class="badge badge-body">INTERÉS</span>';
-            }
+            // Filtros
+            if (currentFilter === 'vma' && !tags.some(t => t.includes('VMA'))) return;
+            if (currentFilter === 'body' && !tags.some(t => t.includes('BODY'))) return;
+            if (search && !chat.nombre.toLowerCase().includes(search) && !id.includes(search)) return;
 
-            const div = document.createElement('div');
-            div.className = `chat-item ${currentChatId === id ? 'active' : ''}`;
-            div.innerHTML = `
-                <input type="checkbox" class="chat-check" onclick="event.stopPropagation(); toggleSelect('${id}')" ${isSel ? 'checked' : ''}>
-                <div class="avatar" style="background:${stringToColor(chat.nombre)}">${chat.nombre.charAt(0)}</div>
-                <div class="chat-info" onclick="selectChat('${id}')">
-                    <div class="chat-name">${chat.nombre} <span style="font-size:11px;color:#999;">${new Date(chat.lastTs).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></div>
-                    <div class="chat-last-msg">${lastMsg.from==='Zara'?'🤖':'👤'} ${lastMsg.texto || ''}</div>
-                    <div class="badges">${badgesHtml}</div>
+            const item = document.createElement('div');
+            item.className = `chat-item ${currentChatId === id ? 'active' : ''}`;
+            item.onclick = () => { currentChatId = id; renderMessages(id); renderChatList(); };
+
+            const unread = chat.unread > 0 ? `<span class="badge-unread">${chat.unread}</span>` : '';
+            const lastMsg = chat.mensajes[chat.mensajes.length - 1];
+            
+            item.innerHTML = `
+                <div class="chat-info">
+                    <span class="chat-name">${chat.nombre} <small style="color:#999">+${id}</small></span>
+                    <span class="chat-last">${lastMsg ? lastMsg.texto : ''}</span>
+                    <div>
+                        ${tags.map(t => `<span class="tag-pill ${t.includes('VMA')?'tag-vma':'tag-body'}">${t}</span>`).join('')}
+                    </div>
                 </div>
+                ${unread}
             `;
-            list.appendChild(div);
+            list.appendChild(item);
         });
-    }
-
-    function selectChat(id) {
-        currentChatId = id;
-        document.getElementById('empty-view').style.display = 'none';
-        document.getElementById('chat-view').style.display = 'flex';
-        renderMessages(id);
-        renderList();
     }
 
     function renderMessages(id) {
         const chat = allChats[id];
-        document.getElementById('h-name').innerText = chat.nombre;
-        document.getElementById('h-phone').innerText = `+${id}`;
-        document.getElementById('wa-link').href = `https://wa.me/${id}`; // EL FIX DEL NÚMERO FUNCIONA AQUÍ
+        const container = document.getElementById('messages');
+        const header = document.getElementById('chat-header');
         
-        const div = document.getElementById('messages');
-        div.innerHTML = '';
+        header.innerHTML = `Chat con ${chat.nombre} (+${id}) <button class="btn-delete" onclick="deleteChat('${id}')">Borrar Chat</button>`;
+        container.innerHTML = '';
+        
+        let lastDate = "";
+
         chat.mensajes.forEach(m => {
-            const el = document.createElement('div');
-            el.className = `msg ${m.from==='Zara'?'zara':'cliente'}`;
-            el.innerHTML = `${m.texto}<div class="time">${m.hora}</div>`;
-            div.appendChild(el);
+            // Manejo de fechas
+            const msgDate = new Date().toLocaleDateString(); // Simplificado para el ejemplo
+            if (msgDate !== lastDate) {
+                const divider = document.createElement('div');
+                divider.className = 'msg-date-divider';
+                divider.innerText = msgDate;
+                container.appendChild(divider);
+                lastDate = msgDate;
+            }
+
+            const div = document.createElement('div');
+            div.className = `msg ${m.from}`;
+            div.innerHTML = `
+                ${m.texto}
+                <span class="msg-time">${m.hora}</span>
+            `;
+            container.appendChild(div);
         });
-        div.scrollTop = div.scrollHeight;
+        container.scrollTop = container.scrollHeight;
     }
 
-    function stringToColor(str) {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-        return '#' + "00000".substring(0, 6 - c.length) + c;
+    function setFilter(f) {
+        currentFilter = f;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        event.target.classList.add('active');
+        renderChatList();
     }
 
-    setInterval(loadData, 3000);
-    loadData();
+    async function deleteChat(id) {
+        if (!confirm("¿Borrar este historial?")) return;
+        await fetch('/api/delete-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + btoa('admin:123456') },
+            body: JSON.stringify({ ids: [id] })
+        });
+        currentChatId = null;
+        loadHistory();
+    }
+
+    document.getElementById('search').oninput = renderChatList;
+    setInterval(loadHistory, 3000);
+    loadHistory();
 </script>
 </body>
 </html>
