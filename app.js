@@ -24,56 +24,43 @@ let webCode = "";
 let qrTimeout = null;
 let clientesMap = []; 
 
-// CARGA DE CLIENTES (LA BASE DE LA VERDAD)
 function cargarMapaClientes() {
     try {
         if (fs.existsSync(CLIENTES_FILE)) {
             const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
             clientesMap = filas.map(l => {
                 const [f, n] = l.split(',');
-                // Guardamos fono limpio y nombre en minúsculas para comparar
                 return { fono: f.replace(/\D/g, ''), nombre: n ? n.trim() : 'Sin Nombre' };
             });
-            console.log(`📚 Base de Clientes cargada: ${clientesMap.length} registros.`);
         }
     } catch (e) { console.error(e); }
 }
 cargarMapaClientes();
 
-// DESTINATARIOS ALERTAS
+// DESTINATARIOS
 const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net", "56937648536@s.whatsapp.net", "218120098701428@s.whatsapp.net"]; 
 const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", "56937648536@s.whatsapp.net", "218120098701428@s.whatsapp.net"];
 
-// UTILIDAD: ENCONTRAR EL NÚMERO REAL
 function obtenerFonoMaestro(jid, pushName) {
     let fonoLimpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0].replace(/\D/g, '');
-    
-    // 1. Si el número ya está en nuestra lista CSV, es el maestro.
     const exactMatch = clientesMap.find(c => c.fono === fonoLimpio);
     if (exactMatch) return fonoLimpio;
-
-    // 2. Si es un número raro (LID) o no coincide, buscamos por NOMBRE en el CSV
     if (pushName) {
         const nameClean = pushName.toLowerCase();
         const nameMatch = clientesMap.find(c => {
             const dbName = c.nombre.toLowerCase();
             return dbName.includes(nameClean) || nameClean.includes(dbName);
         });
-        if (nameMatch) {
-            console.log(`🔄 FUSIONANDO IDENTIDAD: ${fonoLimpio} es en realidad ${nameMatch.fono} (${nameMatch.nombre})`);
-            return nameMatch.fono; // ¡BINGO! Usamos el del CSV
-        }
+        if (nameMatch) return nameMatch.fono;
     }
-    return fonoLimpio; // Si no hay match, usamos lo que llegó
+    return fonoLimpio;
 }
 
-// ALERTAS
 async function enviarAlerta(grupo, mensaje) {
     if (!sock) return;
-    for (const d of grupo) { try { await delay(1000); await sock.sendMessage(d, { text: mensaje }); } catch (e) {} }
+    for (const d of grupo) { try { await delay(1500); await sock.sendMessage(d, { text: mensaje }); } catch (e) {} }
 }
 
-// REGISTRO CON ETIQUETAS (TAGS)
 function registrarChat(fonoMaestro, nombre, mensaje, tag = null, esBot = false) {
     try {
         let chats = {};
@@ -81,20 +68,11 @@ function registrarChat(fonoMaestro, nombre, mensaje, tag = null, esBot = false) 
         
         let esNuevo = false;
         if (!chats[fonoMaestro]) {
-            chats[fonoMaestro] = { 
-                nombre, 
-                mensajes: [], 
-                unread: 0, 
-                lastTs: 0, 
-                tags: [] // AQUÍ GUARDAMOS LOS ESTADOS (VMA, BODY, COMPRA)
-            };
+            chats[fonoMaestro] = { nombre, mensajes: [], unread: 0, lastTs: 0, tags: [] };
             esNuevo = true;
         }
 
-        // Agregar Tag si existe y no está repetido
-        if (tag && !chats[fonoMaestro].tags.includes(tag)) {
-            chats[fonoMaestro].tags.push(tag);
-        }
+        if (tag && !chats[fonoMaestro].tags.includes(tag)) chats[fonoMaestro].tags.push(tag);
 
         chats[fonoMaestro].mensajes.push({ 
             hora: new Date().toLocaleTimeString('es-CL'), 
@@ -102,7 +80,6 @@ function registrarChat(fonoMaestro, nombre, mensaje, tag = null, esBot = false) 
             from: esBot ? 'Zara' : 'Cliente' 
         });
         chats[fonoMaestro].lastTs = Date.now();
-        
         if (!esBot) chats[fonoMaestro].unread++;
         else chats[fonoMaestro].unread = 0;
         
@@ -121,16 +98,11 @@ function obtenerHistorial(fono) {
     } catch (e) { return []; }
 }
 
-// CONEXIÓN
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     sock = makeWASocket({ 
-        auth: state, 
-        printQRInTerminal: false,
-        logger: pino({ level: "silent" }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
-        syncFullHistory: false,
-        connectTimeoutMs: 60000
+        auth: state, printQRInTerminal: false, logger: pino({ level: "silent" }), 
+        browser: ["Ubuntu", "Chrome", "20.0.04"], syncFullHistory: false, connectTimeoutMs: 60000 
     });
 
     if (!sock.authState.creds.registered) {
@@ -165,35 +137,37 @@ async function connectToWhatsApp() {
                 let realJid = msg.key.remoteJid;
                 try { if (typeof jidNormalizedUser === 'function') realJid = jidNormalizedUser(realJid) || realJid; } catch(e) {}
                 
-                // 1. OBTENER EL FONO MAESTRO (Siempre será el del CSV si coincide nombre)
                 const fonoMaestro = obtenerFonoMaestro(realJid, nombre);
-                
-                // 2. REGISTRAR MENSAJE
                 const esNuevo = registrarChat(fonoMaestro, nombre, text, null, false);
 
-                if (esNuevo) await enviarAlerta(STAFF_VMA, `🔔 NUEVO: ${nombre} (+${fonoMaestro})`);
+                // ALERTA 1: INICIAL (Si es nuevo chat en el historial)
+                if (esNuevo) await enviarAlerta(STAFF_VMA, `🔔 NUEVO CLIENTE: ${nombre} (+${fonoMaestro})`);
 
                 try {
                     const historial = obtenerHistorial(fonoMaestro);
                     const response = await chatWithGPT(text, fonoMaestro, historial);
-                    
                     await sock.sendMessage(msg.key.remoteJid, { text: response });
                     
-                    // 3. ANALIZAR TAGS (Etiquetas)
+                    // --- LÓGICA DE ALERTAS AJUSTADA AL TEXTO ---
                     let tag = null;
                     const botTxt = response.toLowerCase();
                     
-                    if (botTxt.includes("resumen") || botTxt.includes("total")) {
+                    // ALERTA VMA: Solo si confirma retiro o el bot dice "te espero el"
+                    if (botTxt.includes("te espero el") || botTxt.includes("retiro el") || botTxt.includes("retiro agendado")) {
                         tag = "VMA_VENTA";
-                        await enviarAlerta(STAFF_VMA, `💰 VENTA VMA: ${nombre}`);
+                        await enviarAlerta(STAFF_VMA, `💰 VENTA CERRADA VMA: ${nombre}`);
                     }
-                    if ((botTxt.includes("hifu") || botTxt.includes("lipo")) && !botTxt.includes("agendado")) {
+                    
+                    // ALERTA BODY INTERÉS: Solo si Zara explica tratamientos (significa que el cliente preguntó)
+                    if ((botTxt.includes("hifu") || botTxt.includes("lipo") || botTxt.includes("depilación")) && !botTxt.includes("agendado")) {
                         tag = "BODY_INTERES";
-                        await enviarAlerta(STAFF_BODY, `👀 INTERÉS BODY: ${nombre}`);
+                        await enviarAlerta(STAFF_BODY, `👀 INTERESADO EN INFO BODY: ${nombre}`);
                     }
-                    if ((botTxt.includes("agendado") || botTxt.includes("te espero")) && botTxt.includes("body")) {
+                    
+                    // ALERTA BODY DATOS: Cuando ya confirma agenda y hay señales de datos
+                    if ((botTxt.includes("agendado") || botTxt.includes("agenda")) && (botTxt.includes("correo") || botTxt.includes("@") || botTxt.includes("mail"))) {
                         tag = "BODY_CITA";
-                        await enviarAlerta(STAFF_BODY, `✅ CITA BODY: ${nombre}`);
+                        await enviarAlerta(STAFF_BODY, `✅ CITA BODY AGENDADA: ${nombre}\n(Verificar Email en Chat)`);
                     }
 
                     registrarChat(fonoMaestro, nombre, response, tag, true);
@@ -204,26 +178,23 @@ async function connectToWhatsApp() {
     });
 }
 
-// API BORRADO MASIVO
+// API BULK DELETE
 app.post('/api/delete-bulk', (req, res) => {
     try {
         const auth = req.headers.authorization;
         if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) return res.status(401).send('Acceso denegado');
-        
         const { ids } = req.body;
-        if (!ids || !Array.isArray(ids)) return res.status(400).send("IDs inválidos");
-
         if (fs.existsSync(CHAT_HISTORY_FILE)) {
             let chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
             ids.forEach(id => delete chats[id]);
             fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
-            return res.json({ success: true, deleted: ids.length });
+            return res.json({ success: true });
         }
         res.json({ success: false });
     } catch(e) { res.status(500).send(e.message); }
 });
 
-// RUTAS BASE
+// RUTAS STANDARD
 app.get('/estado', (req, res) => res.send(`<html><head><meta http-equiv="refresh" content="3"></head><body><h1>${webStatus}</h1><h2>${webCode}</h2></body></html>`));
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
@@ -232,7 +203,6 @@ app.get('/monitor', (req, res) => {
 });
 app.get('/api/history', (req, res) => { if (fs.existsSync(CHAT_HISTORY_FILE)) res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'))); else res.json({}); });
 
-// ENVÍO CAMPAÑA OUTBOUND (USA EL MAPA PARA REGISTRAR BIEN)
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: Bot desconectado");
     if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: Falta clientes.csv");
@@ -248,7 +218,6 @@ app.get('/iniciar-envio', async (req, res) => {
             const msg = `Hola ${nombre.trim()}, soy Camila de Uniformes VMA. Te escribo para enfrentar a tiempo al fantasma de marzo! ¿Te ayudo con los uniformes?`;
             try {
                 await sock.sendMessage(jid, { text: msg });
-                // IMPORTANTE: Registramos con el fono limpio para que coincida siempre
                 registrarChat(fonoClean, nombre.trim(), msg, null, true);
                 res.write(`✅ Enviado a ${nombre}\n`);
                 await delay(20000); 
