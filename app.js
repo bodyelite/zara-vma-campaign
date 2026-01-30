@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileley");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const express = require("express");
 const fs = require("fs");
@@ -50,7 +50,7 @@ app.get('/monitor', (req, res) => {
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Zara Web Pro</title>
+        <title>Zara Web Monitor</title>
         <script>
             setTimeout(() => { location.reload(); }, 10000);
             window.onload = () => { 
