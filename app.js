@@ -9,8 +9,6 @@ require("dotenv").config();
 
 const app = express();
 app.use(express.json());
-
-// Servir archivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
@@ -18,21 +16,40 @@ const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
 const CLIENTES_FILE = path.join(__dirname, "clientes.csv");
 
+// --- CONFIGURACIÓN DE EQUIPOS DE ALERTA ---
+// VMA: Números extraídos de la imagen proporcionada
+const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
+
+// BODY ELITE: Recepción + Valentina + Juan Carlos
+const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", "56937648536@s.whatsapp.net"];
+
 let sock;
 
-// Función para guardar metadatos
+async function enviarAlerta(grupo, mensaje) {
+    if (!sock) return;
+    for (const numero of grupo) {
+        try {
+            await sock.sendMessage(numero, { text: mensaje });
+        } catch (e) {
+            console.error(`Error alerta a ${numero}`, e);
+        }
+    }
+}
+
 function registrarChat(jid, nombre, mensaje, esBot = false) {
     let chats = {};
+    let esNuevo = false;
     try {
         if (fs.existsSync(CHAT_HISTORY_FILE)) {
             chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         }
         
-        // CORRECCIÓN: Usamos el ID normalizado siempre
+        // Limpieza de número para llave única
         const fonoLimpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
         
         if (!chats[fonoLimpio]) {
             chats[fonoLimpio] = { nombre, mensajes: [], unread: 0, lastTs: 0 };
+            esNuevo = true;
         }
         
         chats[fonoLimpio].mensajes.push({
@@ -42,18 +59,54 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
         });
 
         chats[fonoLimpio].lastTs = Date.now();
-        if (!esBot) { 
-            chats[fonoLimpio].unread = (chats[fonoLimpio].unread || 0) + 1;
-        } else {
-             chats[fonoLimpio].unread = 0; 
-        }
+        if (!esBot) chats[fonoLimpio].unread = (chats[fonoLimpio].unread || 0) + 1;
+        else chats[fonoLimpio].unread = 0; 
 
         if (chats[fonoLimpio].mensajes.length > 60) chats[fonoLimpio].mensajes.shift();
         
         fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
     } catch (e) { console.error("Error guardando chat:", e); }
+
+    return esNuevo;
 }
 
+// --- CEREBRO DE ALERTAS ---
+async function verificarAlertas(realJid, nombre, msgCliente, msgBot, esNuevo) {
+    const telefono = realJid.split('@')[0];
+    const clienteTxt = msgCliente.toLowerCase();
+    const botTxt = (msgBot || "").toLowerCase();
+
+    // 1. ALERTA VMA: NUEVO CLIENTE (Responde a campaña)
+    if (esNuevo && !msgBot) {
+        await enviarAlerta(STAFF_VMA, `🔔 *NUEVO CLIENTE VMA DETECTADO*\n👤 Nombre: ${nombre}\n📱 WSP: +${telefono}`);
+        return;
+    }
+
+    // 2. ALERTA VMA: PEDIDO Y RETIRO DEFINIDO
+    // Detectamos cuando Camila confirma el resumen final con retiro
+    if (botTxt.includes("resumen final") && (botTxt.includes("retiro") || botTxt.includes("fecha"))) {
+        await enviarAlerta(STAFF_VMA, `✅ *PEDIDO VMA CONFIRMADO*\n👤 Cliente: ${nombre}\n📱 WSP: +${telefono}\n\n📋 *Detalle del Acuerdo:*\n${msgBot}`);
+    }
+
+    // 3. ALERTA BODY: INTERÉS POSITIVO
+    // Si pregunta qué hacen, precios, lipo, o responde positivo al beneficio
+    const keywordsBody = ["que hacen", "precio", "lipo", "facial", "agendar", "me interesa", "bueno", "si, gracias", "evaluacion", "body elite"];
+    // Solo alertamos si el mensaje del cliente tiene intención real
+    if (keywordsBody.some(k => clienteTxt.includes(k))) {
+        // Filtro simple para no saturar con cualquier "si"
+        if (clienteTxt.length > 2) {
+             await enviarAlerta(STAFF_BODY, `👀 *INTERÉS BODY DETECTADO*\n👤 Cliente: ${nombre}\n📱 WSP: +${telefono}\n💬 Dice: "${msgCliente}"`);
+        }
+    }
+
+    // 4. ALERTA BODY: AGENDADO
+    // Si Camila confirma la cita en Body Elite
+    if (botTxt.includes("body elite") && (botTxt.includes("agendado") || botTxt.includes("reserva"))) {
+        await enviarAlerta(STAFF_BODY, `📅 *CITA BODY ELITE AGENDADA*\n👤 Cliente: ${nombre}\n📱 WSP: +${telefono}\n\n🤖 *Confirmación:*\n${msgBot}`);
+    }
+}
+
+// ... RESTO DE RUTAS (API, Excel, Monitor) ...
 app.get('/mark-read', (req, res) => {
     const fono = req.query.id;
     if (fs.existsSync(CHAT_HISTORY_FILE)) {
@@ -66,31 +119,21 @@ app.get('/mark-read', (req, res) => {
     res.json({ success: true });
 });
 
-// API Monitor
 app.get('/api/history', (req, res) => {
     if (fs.existsSync(CHAT_HISTORY_FILE)) {
-        const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
-        res.json(chats);
-    } else {
-        res.json({});
-    }
+        res.json(JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')));
+    } else res.json({});
 });
 
-// Excel
 app.get('/api/export-excel', async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Chats VMA-BODY');
-
     sheet.columns = [
-        { header: 'Cliente (Fono)', key: 'user', width: 15 },
-        { header: 'Nombre', key: 'name', width: 20 },
-        { header: 'Hora', key: 'time', width: 10 },
-        { header: 'Remitente', key: 'from', width: 10 },
-        { header: 'Mensaje', key: 'text', width: 50 },
-        { header: 'Interés Body', key: 'interest', width: 10 },
+        { header: 'Cliente', key: 'user', width: 15 }, { header: 'Nombre', key: 'name', width: 20 },
+        { header: 'Hora', key: 'time', width: 10 }, { header: 'Remitente', key: 'from', width: 10 },
+        { header: 'Mensaje', key: 'text', width: 50 }, { header: 'Interés Body', key: 'interest', width: 10 },
         { header: 'Estado', key: 'status', width: 15 }
     ];
-
     if (fs.existsSync(CHAT_HISTORY_FILE)) {
         const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         Object.keys(chats).forEach(fono => {
@@ -99,29 +142,15 @@ app.get('/api/export-excel', async (req, res) => {
             const fullText = msgs.map(m => m.texto).join(" ").toLowerCase();
             let interestBody = (fullText.includes("body") || fullText.includes("evaluacion")) ? "SI" : "NO";
             let status = (fullText.includes("agendado") || fullText.includes("retiro")) ? "Cierre" : "Consulta";
-
-            msgs.forEach(m => {
-                sheet.addRow({
-                    user: fono,
-                    name: chat.nombre,
-                    time: m.hora,
-                    from: m.from,
-                    text: m.texto,
-                    interest: interestBody,
-                    status: status
-                });
-            });
+            msgs.forEach(m => sheet.addRow({ user: fono, name: chat.nombre, time: m.hora, from: m.from, text: m.texto, interest: interestBody, status: status }));
         });
     }
-
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=Reporte_Campaña.xlsx');
-
+    res.setHeader('Content-Disposition', 'attachment; filename=Reporte.xlsx');
     await workbook.xlsx.write(res);
     res.end();
 });
 
-// Monitor HTML protegido
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
     if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
@@ -131,14 +160,11 @@ app.get('/monitor', (req, res) => {
     res.sendFile(path.join(__dirname, 'public/monitor.html'));
 });
 
-// Envíos
 app.get('/iniciar-envio', async (req, res) => {
     if (!sock) return res.send("Error: WhatsApp Desconectado");
     if (!fs.existsSync(CLIENTES_FILE)) return res.send("Error: No existe clientes.csv");
-    
     const filas = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
     res.write("Enviando...");
-    
     for (const linea of filas.slice(1)) {
         const [fono, nombre] = linea.split(',');
         if (fono) {
@@ -146,7 +172,6 @@ app.get('/iniciar-envio', async (req, res) => {
             const msg = `Hola ${nombre.trim()}, soy Camila de VMA. ¿Te ayudo con los uniformes?`;
             try {
                 await sock.sendMessage(jid, { text: msg });
-                // Aquí guardamos con el número limpio directamente
                 registrarChat(fono.trim(), nombre.trim(), msg, true);
                 res.write(".");
                 await delay(5000);
@@ -158,39 +183,30 @@ app.get('/iniciar-envio', async (req, res) => {
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState("/data/auth_info_baileys");
-    sock = makeWASocket({
-        auth: state,
-        logger: pino({ level: "error" }),
-        printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
-    });
-
+    sock = makeWASocket({ auth: state, logger: pino({ level: "error" }), printQRInTerminal: false, browser: ["Ubuntu", "Chrome", "20.0.04"] });
     sock.ev.on("connection.update", (u) => {
         if (u.connection === "open") console.log("✅ Zara Online");
         if (u.connection === "close") setTimeout(connectToWhatsApp, 5000);
     });
-
     sock.ev.on("creds.update", saveCreds);
-
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-        
         if (text) {
-            // CORRECCIÓN CRÍTICA: Normalizamos el JID para obtener siempre el número real
-            // jidNormalizedUser convierte el LID (código largo) al número de teléfono real
             const realJid = jidNormalizedUser(msg.key.remoteJid);
+            const nombre = msg.pushName || "Cliente";
             
-            registrarChat(realJid, msg.pushName || "Cliente", text, false);
+            const esNuevo = registrarChat(realJid, nombre, text, false);
+            if (esNuevo) await verificarAlertas(realJid, nombre, text, "", true);
+
             const response = await chatWithGPT(text, realJid);
             await sock.sendMessage(msg.key.remoteJid, { text: response });
-            registrarChat(realJid, msg.pushName || "Cliente", response, true);
+            
+            registrarChat(realJid, nombre, response, true);
+            await verificarAlertas(realJid, nombre, text, response, false);
         }
     });
 }
 
-app.listen(PORT, () => {
-    console.log(`Puerto ${PORT}`);
-    connectToWhatsApp();
-});
+app.listen(PORT, () => { console.log(`Puerto ${PORT}`); connectToWhatsApp(); });
