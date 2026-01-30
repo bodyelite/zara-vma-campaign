@@ -16,11 +16,8 @@ const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "123456";
 const CHAT_HISTORY_FILE = "/data/historial_chats.json";
 const CLIENTES_FILE = path.join(__dirname, "clientes.csv");
 
-// --- CONFIGURACIÓN DE EQUIPOS DE ALERTA ---
-// VMA: Números extraídos de la imagen proporcionada
+// EQUIPOS DE ALERTA
 const STAFF_VMA = ["56971350852@s.whatsapp.net", "56998251331@s.whatsapp.net"]; 
-
-// BODY ELITE: Recepción + Valentina + Juan Carlos
 const STAFF_BODY = ["56983300262@s.whatsapp.net", "56955145504@s.whatsapp.net", "56937648536@s.whatsapp.net"];
 
 let sock;
@@ -36,6 +33,13 @@ async function enviarAlerta(grupo, mensaje) {
     }
 }
 
+function formatearFonoAlerta(jid) {
+    const limpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
+    // Si es un ID técnico largo (>15 dígitos), lo ocultamos para que no se vea feo
+    if (limpio.length > 15) return "(ID Privado - Ver Nombre)";
+    return `+${limpio}`;
+}
+
 function registrarChat(jid, nombre, mensaje, esBot = false) {
     let chats = {};
     let esNuevo = false;
@@ -44,7 +48,6 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
             chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
         }
         
-        // Limpieza de número para llave única
         const fonoLimpio = jid.replace('@s.whatsapp.net', '').replace('@lid', '').split(':')[0];
         
         if (!chats[fonoLimpio]) {
@@ -70,43 +73,36 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
     return esNuevo;
 }
 
-// --- CEREBRO DE ALERTAS ---
+// CEREBRO DE ALERTAS
 async function verificarAlertas(realJid, nombre, msgCliente, msgBot, esNuevo) {
-    const telefono = realJid.split('@')[0];
+    const fonoVisual = formatearFonoAlerta(realJid);
     const clienteTxt = msgCliente.toLowerCase();
     const botTxt = (msgBot || "").toLowerCase();
 
-    // 1. ALERTA VMA: NUEVO CLIENTE (Responde a campaña)
+    // 1. ALERTA VMA: NUEVO
     if (esNuevo && !msgBot) {
-        await enviarAlerta(STAFF_VMA, `🔔 *NUEVO CLIENTE VMA DETECTADO*\n👤 Nombre: ${nombre}\n📱 WSP: +${telefono}`);
+        await enviarAlerta(STAFF_VMA, `🔔 *NUEVO CLIENTE VMA*\n👤 ${nombre}\n📱 ${fonoVisual}`);
         return;
     }
 
-    // 2. ALERTA VMA: PEDIDO Y RETIRO DEFINIDO
-    // Detectamos cuando Camila confirma el resumen final con retiro
+    // 2. ALERTA VMA: PEDIDO OK
     if (botTxt.includes("resumen final") && (botTxt.includes("retiro") || botTxt.includes("fecha"))) {
-        await enviarAlerta(STAFF_VMA, `✅ *PEDIDO VMA CONFIRMADO*\n👤 Cliente: ${nombre}\n📱 WSP: +${telefono}\n\n📋 *Detalle del Acuerdo:*\n${msgBot}`);
+        await enviarAlerta(STAFF_VMA, `✅ *PEDIDO VMA CONFIRMADO*\n👤 ${nombre}\n📱 ${fonoVisual}\n\n📋 *Detalle:*\n${msgBot}`);
     }
 
-    // 3. ALERTA BODY: INTERÉS POSITIVO
-    // Si pregunta qué hacen, precios, lipo, o responde positivo al beneficio
+    // 3. ALERTA BODY: INTERÉS
     const keywordsBody = ["que hacen", "precio", "lipo", "facial", "agendar", "me interesa", "bueno", "si, gracias", "evaluacion", "body elite"];
-    // Solo alertamos si el mensaje del cliente tiene intención real
-    if (keywordsBody.some(k => clienteTxt.includes(k))) {
-        // Filtro simple para no saturar con cualquier "si"
-        if (clienteTxt.length > 2) {
-             await enviarAlerta(STAFF_BODY, `👀 *INTERÉS BODY DETECTADO*\n👤 Cliente: ${nombre}\n📱 WSP: +${telefono}\n💬 Dice: "${msgCliente}"`);
-        }
+    if (keywordsBody.some(k => clienteTxt.includes(k)) && clienteTxt.length > 2) {
+         await enviarAlerta(STAFF_BODY, `👀 *INTERÉS BODY DETECTADO*\n👤 ${nombre}\n📱 ${fonoVisual}\n💬 "${msgCliente}"`);
     }
 
     // 4. ALERTA BODY: AGENDADO
-    // Si Camila confirma la cita en Body Elite
     if (botTxt.includes("body elite") && (botTxt.includes("agendado") || botTxt.includes("reserva"))) {
-        await enviarAlerta(STAFF_BODY, `📅 *CITA BODY ELITE AGENDADA*\n👤 Cliente: ${nombre}\n📱 WSP: +${telefono}\n\n🤖 *Confirmación:*\n${msgBot}`);
+        await enviarAlerta(STAFF_BODY, `📅 *CITA BODY AGENDADA*\n👤 ${nombre}\n📱 ${fonoVisual}\n\n🤖 *Confirmación:*\n${msgBot}`);
     }
 }
 
-// ... RESTO DE RUTAS (API, Excel, Monitor) ...
+// RESTO DE RUTAS
 app.get('/mark-read', (req, res) => {
     const fono = req.query.id;
     if (fs.existsSync(CHAT_HISTORY_FILE)) {
@@ -194,7 +190,10 @@ async function connectToWhatsApp() {
         if (!msg.message || msg.key.fromMe) return;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
         if (text) {
-            const realJid = jidNormalizedUser(msg.key.remoteJid);
+            // INTENTO DE NORMALIZACIÓN + EXTRACCIÓN REAL
+            let realJid = jidNormalizedUser(msg.key.remoteJid);
+            if (msg.key.participant) realJid = jidNormalizedUser(msg.key.participant); // A veces viene aquí en grupos/multidispositivo
+
             const nombre = msg.pushName || "Cliente";
             
             const esNuevo = registrarChat(realJid, nombre, text, false);
