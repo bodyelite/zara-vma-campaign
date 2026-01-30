@@ -140,34 +140,36 @@ async function connectToWhatsApp() {
                 const fonoMaestro = obtenerFonoMaestro(realJid, nombre);
                 const esNuevo = registrarChat(fonoMaestro, nombre, text, null, false);
 
-                // ALERTA 1: INICIAL (Si es nuevo chat en el historial)
-                if (esNuevo) await enviarAlerta(STAFF_VMA, `🔔 NUEVO CLIENTE: ${nombre} (+${fonoMaestro})`);
+                // ALERTA 1: INICIAL (Siempre que es nuevo chat)
+                if (esNuevo) await enviarAlerta(STAFF_VMA, `🔔 NUEVO CONTACTO: ${nombre} (+${fonoMaestro})`);
 
                 try {
                     const historial = obtenerHistorial(fonoMaestro);
                     const response = await chatWithGPT(text, fonoMaestro, historial);
                     await sock.sendMessage(msg.key.remoteJid, { text: response });
                     
-                    // --- LÓGICA DE ALERTAS AJUSTADA AL TEXTO ---
+                    // --- TRIGGERS DE ALERTAS MEJORADOS ---
                     let tag = null;
                     const botTxt = response.toLowerCase();
-                    
-                    // ALERTA VMA: Solo si confirma retiro o el bot dice "te espero el"
-                    if (botTxt.includes("te espero el") || botTxt.includes("retiro el") || botTxt.includes("retiro agendado")) {
+                    const userTxt = text.toLowerCase();
+
+                    // ALERTA VENTA VMA: Detecta cierre de retiro
+                    if (botTxt.includes("agendamos el retiro") || botTxt.includes("te espero el") || botTxt.includes("retiro agendado") || botTxt.includes("quedamos para el")) {
                         tag = "VMA_VENTA";
-                        await enviarAlerta(STAFF_VMA, `💰 VENTA CERRADA VMA: ${nombre}`);
+                        await enviarAlerta(STAFF_VMA, `💰 VENTA VMA CERRADA: ${nombre}`);
                     }
                     
-                    // ALERTA BODY INTERÉS: Solo si Zara explica tratamientos (significa que el cliente preguntó)
+                    // ALERTA INTERÉS BODY: Detecta preguntas sobre tratamientos
                     if ((botTxt.includes("hifu") || botTxt.includes("lipo") || botTxt.includes("depilación")) && !botTxt.includes("agendado")) {
                         tag = "BODY_INTERES";
-                        await enviarAlerta(STAFF_BODY, `👀 INTERESADO EN INFO BODY: ${nombre}`);
+                        await enviarAlerta(STAFF_BODY, `👀 INTERÉS INFO BODY: ${nombre}`);
                     }
                     
-                    // ALERTA BODY DATOS: Cuando ya confirma agenda y hay señales de datos
-                    if ((botTxt.includes("agendado") || botTxt.includes("agenda")) && (botTxt.includes("correo") || botTxt.includes("@") || botTxt.includes("mail"))) {
+                    // ALERTA CITA BODY: Detecta agenda + correo (o intento de agenda)
+                    // Se activa si el bot confirma agenda O si el usuario acaba de dar un correo
+                    if ((botTxt.includes("agendamos") && botTxt.includes("body")) || (userTxt.includes("@") && botTxt.includes("agendado"))) {
                         tag = "BODY_CITA";
-                        await enviarAlerta(STAFF_BODY, `✅ CITA BODY AGENDADA: ${nombre}\n(Verificar Email en Chat)`);
+                        await enviarAlerta(STAFF_BODY, `✅ CITA BODY CONFIRMADA: ${nombre}\n(Revisar Email en el chat)`);
                     }
 
                     registrarChat(fonoMaestro, nombre, response, tag, true);
@@ -194,7 +196,7 @@ app.post('/api/delete-bulk', (req, res) => {
     } catch(e) { res.status(500).send(e.message); }
 });
 
-// RUTAS STANDARD
+// RUTAS
 app.get('/estado', (req, res) => res.send(`<html><head><meta http-equiv="refresh" content="3"></head><body><h1>${webStatus}</h1><h2>${webCode}</h2></body></html>`));
 app.get('/monitor', (req, res) => {
     const auth = req.headers.authorization;
