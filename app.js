@@ -16,7 +16,6 @@ const CLIENTES_FILE = path.join(__dirname, "clientes.csv");
 
 let sock;
 
-// Registro de mensajes para la consola visual [cite: 2026-01-30]
 function registrarChat(jid, nombre, mensaje, esBot = false) {
     let chats = {};
     try {
@@ -32,82 +31,62 @@ function registrarChat(jid, nombre, mensaje, esBot = false) {
     } catch (e) { console.error("Error historial:", e); }
 }
 
-// === RUTA DE LANZAMIENTO REAL ===
 app.get('/iniciar-envio', async (req, res) => {
     if (!fs.existsSync(CLIENTES_FILE)) return res.status(404).send("Archivo clientes.csv no encontrado");
-    
     const contenido = fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').filter(l => l.trim() !== "");
-    const filas = contenido.slice(1); // Ignorar cabecera
+    const filas = contenido.slice(0); // Tomamos todas las filas segun tu archivo actual
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.write("🚀 Iniciando campaña real...\n\n");
 
     for (const linea of filas) {
-        const [nombre, fono] = linea.split(',');
-        if (fono && fono.trim() !== "") {
-            const jid = fono.trim() + "@s.whatsapp.net";
-            const texto = `Hola ${nombre.trim()}, soy Camila de VMA. Te escribo para dejar listos los uniformes hoy y ahorrarte las filas de marzo 🏃💨. ¿Te ayudo con tallas o precios?`;
+        const parts = linea.split(',');
+        const fono = parts[0]?.trim();
+        const nombre = parts[1]?.trim() || "Cliente";
+        
+        if (fono && fono.length > 8) {
+            const jid = fono + "@s.whatsapp.net";
+            const texto = `Hola ${nombre}, soy Camila de VMA. Te escribo para dejar listos los uniformes hoy y ahorrarte las filas de marzo 🏃💨. ¿Te ayudo con tallas o precios?`;
             
             try {
                 await sock.sendMessage(jid, { text: texto });
-                registrarChat(jid, nombre.trim(), texto, true);
-                res.write(`✅ Enviado: ${nombre.trim()} (${fono.trim()})\n`);
-                await delay(5000); // Pausa anti-bloqueo
+                registrarChat(jid, nombre, texto, true);
+                res.write(`✅ Enviado: ${nombre} (${fono})\n`);
+                await delay(5000);
             } catch (err) {
-                res.write(`❌ Error en ${nombre.trim()}: ${err.message}\n`);
+                res.write(`❌ Error en ${nombre}: ${err.message}\n`);
             }
         }
     }
     res.end("\n🏁 Envío masivo completado.");
 });
 
-// === MONITOR DE CHATS EN VIVO ===
-app.get('/monitor', (req, res) => {
-    const auth = req.headers.authorization;
-    if (!auth || Buffer.from(auth.split(' ')[1], 'base64').toString().split(':')[1] !== MONITOR_PASSWORD) {
-        res.setHeader('WWW-Authenticate', 'Basic realm="Monitor"');
-        return res.status(401).send('Acceso denegado');
-    }
-
-    let htmlChats = '<p style="text-align:center;">Esperando respuestas...</p>';
-    if (fs.existsSync(CHAT_HISTORY_FILE)) {
-        const chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
-        htmlChats = Object.keys(chats).reverse().map(jid => `
-            <div style="background:white; border-radius:10px; padding:15px; margin-bottom:15px; border-left:5px solid #0084ff; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                <h4 style="margin:0 0 10px 0;">👤 ${chats[jid].nombre} <small style="color:#888;">(${jid.split('@')[0]})</small></h4>
-                <div style="background:#f7f8fa; padding:10px; border-radius:8px; font-size:0.9em;">
-                    ${chats[jid].mensajes.map(m => `
-                        <p style="margin:5px 0; text-align:${m.from === 'Camila' ? 'right' : 'left'}">
-                            <span style="background:${m.from === 'Camila' ? '#0084ff' : '#e4e6eb'}; color:${m.from === 'Camila' ? 'white' : 'black'}; padding:5px 10px; border-radius:10px; display:inline-block;">
-                                <b>${m.from}:</b> ${m.texto}
-                            </span>
-                        </p>
-                    `).join('')}
-                </div>
-            </div>
-        `).join('');
-    }
-
-    res.send(`
-        <html>
-            <head><meta http-equiv="refresh" content="10"><title>Consola Camila</title></head>
-            <body style="font-family:sans-serif; background:#f0f2f5; padding:20px;">
-                <div style="max-width:700px; margin:auto;">
-                    <h1 style="text-align:center; color:#1c1e21;">💬 Chats en Tiempo Real</h1>
-                    ${htmlChats}
-                </div>
-            </body>
-        </html>
-    `);
-});
-
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState("/data/auth_info_baileys");
-    sock = makeWASocket({ auth: state, printQRInTerminal: false, browser: ["Ubuntu", "Chrome", "20.0.04"] });
     
-    sock.ev.on("connection.update", (u) => {
-        if (u.connection === "open") console.log("✅ Camila Online");
-        if (u.connection === "close") connectToWhatsApp();
+    sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        logger: pino({ level: "silent" }),
+        connectTimeoutMs: 60000, // Aumentado para evitar el bucle en Render
+        defaultQueryTimeoutMs: 0,
+        keepAliveIntervalMs: 10000,
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
+    });
+
+    sock.ev.on("connection.update", (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === "close") {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log("Conexión cerrada. Razón:", reason);
+            if (reason !== DisconnectReason.loggedOut) connectToWhatsApp();
+        } else if (connection === "open") {
+            console.log("✅ Camila Online y Estable");
+        }
+        
+        if (update.pairingCode) {
+            console.log("NUEVO CODIGO DE VINCULACIÓN:", update.pairingCode);
+        }
     });
 
     sock.ev.on("messages.upsert", async ({ messages }) => {
@@ -122,10 +101,11 @@ async function connectToWhatsApp() {
             registrarChat(jid, msg.pushName || "Cliente", response, true);
         }
     });
+
     sock.ev.on("creds.update", saveCreds);
 }
 
 app.listen(PORT, () => {
-    console.log(`Servidor listo en puerto ${PORT}`);
+    console.log(`Servidor en puerto ${PORT}`);
     connectToWhatsApp();
 });
