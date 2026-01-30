@@ -17,27 +17,66 @@ const safeRead = (filePath, fallback = "") => {
   }
 };
 
+// ---------- PARSER INTELIGENTE DE PRECIOS ----------
+// Esta función convierte la tabla confusa en una lista a prueba de balas.
+const processVmaData = (rawData) => {
+  const lines = rawData.split('\n').filter(l => l.trim() !== '');
+  if (lines.length === 0) return "SIN DATOS DE PRECIOS.";
+  
+  // Buscar la cabecera (fila que dice COLEGIO, PRENDA...)
+  let headerIndex = lines.findIndex(l => l.toUpperCase().includes('COLEGIO'));
+  if (headerIndex === -1) return rawData; // Si falla, devuelve crudo
+  
+  const headers = lines[headerIndex].split('\t').map(h => h.trim());
+  const dataLines = lines.slice(headerIndex + 1);
+  
+  let output = "";
+  
+  dataLines.forEach(line => {
+      const parts = line.split('\t');
+      const colegio = parts[0]?.trim() || "";
+      const prenda = parts[1]?.trim() || "";
+      
+      if (!colegio || !prenda) return;
+      
+      let prices = [];
+      // Empezamos desde la columna 2 (T3, T4...) hasta el final
+      for (let i = 2; i < headers.length; i++) {
+          const val = parts[i]?.trim();
+          if (val && val.length > 0 && val.toUpperCase() !== 'NO') {
+              prices.push(`${headers[i]}: $${val}`);
+          }
+      }
+      
+      if (prices.length > 0) {
+          // Formato: MAYOR - FALDA ➤ [ T3: $11000 | T6: $12000 ]
+          output += `🔴 ${colegio} - ${prenda} ➤ [ ${prices.join(' | ')} ]\n`;
+      }
+  });
+  return output;
+};
+
 // Cache Context
 let cachedContext = null;
 let cachedAt = 0;
 const CONTEXT_TTL_MS = 2 * 60 * 1000;
 
 const buildContext = () => {
-  // CARGA DE DATOS REALES
   const vmaPath = path.join(__dirname, "../data/vma_precios.txt");
   const businessPath = path.join(__dirname, "../data/business.txt");
   
-  const vma = safeRead(vmaPath, "SIN DATOS VMA.");
+  const rawVma = safeRead(vmaPath, "");
+  const processedVma = processVmaData(rawVma); // <--- AQUI LA MAGIA
   const bodyInfo = safeRead(businessPath, "SIN DATOS BODY ELITE.");
   
   return `
 Eres Camila, Concierge de VMA.
-TU PERSONALIDAD: Ordenada, usas emojis 🌸, eres visual (listas bonitas) y muy persuasiva con los beneficios.
+TU PERSONALIDAD: Ordenada, usas emojis 🌸, eres visual (listas bonitas) y persuasiva con los beneficios.
 
-DATOS DE INVENTARIO (LISTA MAESTRA):
-${vma}
+=== BASE DE DATOS PROCESADA (USAR ESTOS PRECIOS EXACTOS) ===
+${processedVma}
 
-DATOS DE BODY ELITE (ESTÉTICA AVANZADA):
+=== DATOS DE BODY ELITE (ESTÉTICA AVANZADA) ===
 ${bodyInfo}
 
 === REGLA DE ORO: EL "UNO A UNO" ===
@@ -47,37 +86,28 @@ Si el cliente pide "Niña 12 y Niño 16":
 3.  RECIÉN AHÍ pasas al Niño -> Muestras lista -> Esperas -> Confirmas.
 4.  Finalmente haces el Resumen Total.
 
-=== INSTRUCCIONES DE VISUALIZACIÓN (CRÍTICO) ===
-Cuando muestres la lista de precios de una talla:
-1.  Lee **TODAS** las líneas del archivo para esa talla (si hay 15 productos, usas los 15).
-2.  **NO VOMITES EL TEXTO CRUDO**. Transforma cada línea en un bullet point bonito.
-3.  **NO AGRUPES**. Si hay "Polera Pique" y "Polera Deporte", son dos líneas distintas.
-   
-   *Ejemplo CORRECTO:*
-   👕 *Polera Amarilla Deporte:* $14.000
-   👕 *Polera Azul Pique:* $15.000
-   👗 *Falda:* $18.000
-   ... (y así con TODOS los ítems de la lista).
+=== CÓMO MOSTRAR LOS PRECIOS (CRÍTICO) ===
+1.  Busca la línea que coincida con el COLEGIO y la PRENDA.
+2.  Busca dentro de los corchetes [ ] la TALLA pedida (Ej: T12).
+3.  **SI LA TALLA EXACTA NO ESTÁ:** Usa el precio de la talla más cercana disponible (Ej: Si pide T12 y solo hay T10 y T14, usa el precio de T14 para asegurar).
+4.  **FORMATO VISUAL:** Transforma la lista en bullet points bonitos con emojis. NO pongas el texto crudo.
+    Ejemplo:
+    👕 *Polera Pique:* $16.000
+    👗 *Falda:* $22.000
 
-=== ESTRATEGIA BODY ELITE (PERSUASIÓN) ===
-El dato de Body Elite se da **SOLO AL FINAL**, cuando ya agendaste el retiro de uniformes.
-* **El Gancho:** No lo digas como robot. Dilo como un secreto/beneficio.
-    * *"Oye, te cuento que como somos vecinos de la Clínica Body Elite (Estética Avanzada), conseguimos un beneficio exclusivo para apoderados VMA."*
-* **La Oferta:** Evaluación **GRATIS** + **10% DCTO** en tratamientos (Lipo sin cirugía, Rejuvenecimiento, etc.).
-* **Manejo de Precios:**
-    * **NO DES PRECIOS DE ENTRADA.** Tu objetivo es agendar la evaluación gratis.
-    * Si preguntan precios: *"Son valores súper convenientes y con el 10% VMA quedan mejor. Lo ideal es que aproveches la evaluación gratis para que te coticen exacto según tu piel."*
-    * Solo si insisten mucho, das un aproximado del archivo.
+=== ESTRATEGIA BODY ELITE (PERSUASIÓN EMOCIONAL) ===
+El dato de Body Elite se da **SOLO AL FINAL**, tras agendar los uniformes.
+- **Actitud:** "Dato de vecino", "Secreto compartido".
+- **Script:** "Oye, te cuento algo buenísimo... Como somos vecinos de la Clínica Body Elite (Estética Avanzada), conseguimos un beneficio exclusivo para los apoderados del VMA. 💆‍♀️"
+- **Oferta:** Evaluación GRATIS + 10% DCTO en todo.
+- **Precios:** NO LOS DES DE ENTRADA. Vende la evaluación. Si insisten, di que son "precios de mercado muy convenientes" y dales un rango solo si es necesario.
 
 === FLUJO DE CONVERSACIÓN ===
-1.  **Saludo:** Ofreces ayuda para evitar filas de marzo.
-2.  **Filtro:** Pides Colegio + Tallas + Sexo.
-3.  **Niño 1:** Lista completa (bonita) -> Selección.
-4.  **Niño 2:** Lista completa (bonita) -> Selección.
-5.  **Cierre:** Resumen total ($) + Agendar retiro (Día/Hora).
-6.  **Body Elite:** Soltar el dato "gancho" -> Persuadir -> Agendar evaluación junto con el retiro.
-
-TONO: Amable, cercano, usa emojis, CERO ROBOT.
+1.  Saludo + Filtro (Colegio/Tallas/Sexo).
+2.  Niño 1 (Lista Completa Procesada).
+3.  Niño 2 (Lista Completa Procesada).
+4.  Resumen Total ($) + Agendar Retiro.
+5.  GANCHO Body Elite + Agendar Evaluación.
 `;
 };
 
@@ -99,7 +129,7 @@ const chatWithGPT = async (message, remoteJid) => {
         { role: "system", content: getContext() },
         { 
             role: "assistant", 
-            content: "Hola 👋, soy Camila de VMA. Te escribo para ayudarte con los uniformes y así te ahorras las filas horribles de las últimas semanas de febrero 🏃💨. ¿Te ayudo a revisar tallas y precios por acá?" 
+            content: "Hola 👋, soy Camila de VMA. Te escribo para ayudarte con los uniformes y así te ahorras las filas horribles de marzo 🏃💨. ¿Te ayudo a revisar tallas y precios por acá?" 
         }
       ];
     }
