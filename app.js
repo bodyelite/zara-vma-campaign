@@ -17,34 +17,37 @@ const AUTH_DIR = "/data/auth_info_baileys";
 let botActivo = false; 
 let webStatus = "⏸️ MODO OBSERVADOR";
 
-// Función para clasificar TODO el historial
-function limpiarYClasificar() {
+function clasificarChat(chat) {
+    let tags = [];
+    const mensajes = chat.mensajes || [];
+    if (mensajes.length <= 1) return []; // SI NO HAY RESPUESTA, NO HAY TAG
+
+    const ultimoMensaje = mensajes[mensajes.length - 1];
+    const textoCompleto = mensajes.map(m => m.texto.toLowerCase()).join(" ");
+
+    // SOLO ETIQUETA SI EL ÚLTIMO NO ES "ZARA" (Es decir, el cliente habló)
+    if (ultimoMensaje.from !== 'Zara') {
+        if (textoCompleto.match(/talla|uniforme|colegio|precio|pantal|falda/)) {
+            tags.push("VENTA_VMA");
+        }
+        if (textoCompleto.match(/body|evalua|hifu|lipo|clinica/)) {
+            tags.push("CITA_BODY");
+        }
+    }
+    return [...new Set(tags)];
+}
+
+app.get('/limpiar-pestanas', (req, res) => {
     try {
         if (fs.existsSync(CHAT_HISTORY_FILE)) {
             let chats = JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8'));
             Object.keys(chats).forEach(id => {
-                const c = chats[id];
-                const texto = c.mensajes.map(m => m.texto.toLowerCase()).join(" ");
-                let tags = [];
-                // Si el cliente respondió (más de 1 mensaje) o habla de uniformes -> VMA
-                if (c.mensajes.length > 1 || texto.match(/talla|uniforme|colegio|pantal|falda/)) {
-                    tags.push("VENTA_VMA");
-                }
-                // Si habla de la clínica -> BODY
-                if (texto.match(/body|evalua|hifu|lipo|clinica/)) {
-                    tags.push("CITA_BODY");
-                }
-                chats[id].tags = [...new Set(tags)];
+                chats[id].tags = clasificarChat(chats[id]);
             });
             fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(chats, null, 2));
-            console.log("✅ Historial re-clasificado");
-        }
-    } catch (e) { console.error("Error clasificando:", e); }
-}
-
-app.get('/limpiar-pestanas', (req, res) => {
-    limpiarYClasificar();
-    res.send("<h1>✅ Pestañas Re-Calculadas. Refresca el Monitor.</h1>");
+            res.send("<h1>✅ Pestañas Limpias. Solo verás a quienes respondieron.</h1>");
+        } else { res.send("Sin historial."); }
+    } catch (e) { res.status(500).send(e.message); }
 });
 
 app.get('/api/history', (req, res) => {
@@ -52,13 +55,5 @@ app.get('/api/history', (req, res) => {
     else res.json({});
 });
 
-app.get('/encender-zara', (req, res) => { botActivo = true; res.send("Despertando..."); });
-app.get('/reset', (req, res) => {
-    if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-    process.exit(0);
-});
-
-app.listen(PORT, () => { 
-    console.log("Servidor listo");
-    limpiarYClasificar(); // Ejecutar al iniciar
-});
+app.get('/monitor', (req, res) => res.sendFile(path.join(__dirname, 'public/monitor.html')));
+app.listen(PORT, () => { console.log("Servidor listo"); });
