@@ -47,7 +47,7 @@ function guardarHistorial(data) { fs.writeFileSync(CHAT_HISTORY_FILE, JSON.strin
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 // --- CONFIGURACIÓN STANDARD ---
-const ZARA_NUMBER = "56934424673"; 
+const ZARA_NUMBER = process.env.NUMERO_WSP_A_VINCULAR; 
 const JUAN_CARLOS = "56937648536";
 const TEAM_VMA = ["56998251331", "56971350852"];
 const MENSAJES_CAMPAÑA = [
