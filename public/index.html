@@ -15,56 +15,64 @@
         .btn-red { background: #e53935; } .btn-red:hover { background: #c62828; }
         .status-text { font-size: 1.2rem; margin: 15px 0; font-weight: bold; color: #e53935; } 
         .status-text.online { color: #00a884; }
-        .pairing-code { background: white; color: black; font-size: 2rem; letter-spacing: 5px; padding: 10px; margin: 10px 0; display: none; border-radius: 5px; }
+        #qr-container { background: white; padding: 10px; display: none; margin: 10px auto; width: fit-content; border-radius: 5px; }
+        img { display: block; }
     </style>
 </head>
 <body>
-    <h1>🎛️ ZARA CONTROL V4</h1>
+    <h1>🎛️ ZARA CONTROL V5 (QR)</h1>
     <div class="card">
         <h3>📡 ESTADO DEL MOTOR</h3>
         <div id="status-display" class="status-text">...</div>
-        <div id="code-display" class="pairing-code"></div>
-        <button id="btn-refresh" onclick="checkStatus()" class="btn btn-blue">🔄 REFRESCAR ESTADO</button>
-        <button id="btn-encender" onclick="encenderMotor()" class="btn btn-green">⚡ ENCENDER MOTOR (DESPERTAR)</button>
+        
+        <div id="qr-container">
+            <img id="qr-image" src="" alt="QR Code" width="200" height="200">
+        </div>
+        
+        <button id="btn-refresh" onclick="checkStatus()" class="btn btn-blue">🔄 REFRESCAR (VER QR)</button>
+        <button id="btn-encender" onclick="encenderMotor()" class="btn btn-green">⚡ GENERAR NUEVO QR</button>
     </div>
     <div class="card">
         <h3>🚀 OPERACIONES</h3>
         <a href="/monitor" target="_blank" class="btn btn-blue">📺 ABRIR MONITOR CRM</a>
-        <a href="/iniciar-envio" class="btn btn-green">▶️ REANUDAR CAMPAÑA (Seguro)</a>
+        <a href="/iniciar-envio" class="btn btn-green">▶️ REANUDAR CAMPAÑA</a>
         <br>
         <div style="display:flex; gap:10px;">
-             <a href="/reiniciar-lista" onclick="return confirm('¿Seguro? Esto pondrá el contador en 0.')" class="btn btn-blue" style="font-size:0.8rem; background:#374045;">⏮ RESET CONTADOR</a>
-             <a href="/reset" onclick="return confirm('¿Seguro?')" class="btn btn-red" style="font-size:0.8rem;">💥 RESET TOTAL</a>
+             <a href="/reiniciar-lista" onclick="return confirm('¿Seguro?')" class="btn btn-blue" style="font-size:0.8rem; background:#374045;">⏮ RESET CONTADOR</a>
+             <a href="/reset" onclick="return confirm('¿Seguro?')" class="btn btn-red" style="font-size:0.8rem;">💥 BORRAR SESIÓN (RESET)</a>
         </div>
     </div>
     <script>
         async function checkStatus() {
             const display = document.getElementById('status-display');
+            const qrBox = document.getElementById('qr-container');
+            const qrImg = document.getElementById('qr-image');
+            
             display.innerText = "Consultando...";
             try {
                 const res = await fetch('/estado');
-                let text = await res.text();
-                text = text.replace(/<[^>]*>/g, '').replace(/{|}|"|status|:/g, '').trim();
-                if (text.includes("🔗")) {
-                    display.innerText = "⚠️ VINCULACIÓN REQUERIDA";
+                const data = await res.json();
+                
+                if (data.status === "QR") {
+                    display.innerText = "📷 ESCANEA ESTE QR AHORA";
                     display.className = "status-text";
-                    document.getElementById('code-display').style.display = "block";
-                    document.getElementById('code-display').innerText = text.replace("🔗", "").trim();
-                } else if (text.includes("ONLINE")) {
+                    // Usamos una API externa para convertir el texto QR en imagen
+                    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data.qr)}`;
+                    qrBox.style.display = "block";
+                } else if (data.status.includes("ONLINE")) {
                     display.innerText = "✅ ZARA ONLINE";
                     display.className = "status-text online";
-                    document.getElementById('code-display').style.display = "none";
+                    qrBox.style.display = "none";
                 } else {
-                    display.innerText = text || "OFFLINE";
-                    display.className = "status-text";
-                    document.getElementById('code-display').style.display = "none";
+                    display.innerText = data.status || "OFFLINE";
+                    qrBox.style.display = "none";
                 }
             } catch(e) { display.innerText = "❌ ERROR CONEXIÓN"; }
         }
         async function encenderMotor() {
-            const btn = document.getElementById('btn-encender'); const txt = btn.innerText;
-            btn.innerText = "⏳ INICIANDO..."; btn.disabled = true;
-            try { await fetch('/encender-zara'); setTimeout(() => { checkStatus(); btn.innerText = txt; btn.disabled = false; }, 5000); } catch(e) { btn.disabled = false; }
+            const btn = document.getElementById('btn-encender'); 
+            btn.innerText = "⏳ GENERANDO..."; btn.disabled = true;
+            try { await fetch('/encender-zara'); setTimeout(() => { checkStatus(); btn.innerText = "⚡ GENERAR NUEVO QR"; btn.disabled = false; }, 5000); } catch(e) { btn.disabled = false; }
         }
         checkStatus();
     </script>
