@@ -13,7 +13,8 @@
         .btn-green { background: #00a884; } .btn-green:hover { background: #008f6f; }
         .btn-blue { background: #027eb5; } .btn-blue:hover { background: #026a9a; }
         .btn-red { background: #e53935; } .btn-red:hover { background: #c62828; }
-        .status-text { font-size: 1.2rem; margin: 15px 0; font-weight: bold; color: #00a884; }
+        .status-text { font-size: 1.2rem; margin: 15px 0; font-weight: bold; color: #e53935; } /* Rojo por defecto */
+        .status-text.online { color: #00a884; } /* Verde si online */
         .pairing-code { background: white; color: black; font-size: 2rem; letter-spacing: 5px; padding: 10px; margin: 10px 0; display: none; border-radius: 5px; }
     </style>
 </head>
@@ -22,44 +23,80 @@
 
     <div class="card">
         <h3>📡 ESTADO DEL MOTOR</h3>
-        <div id="status-display" class="status-text">Cargando...</div>
+        <div id="status-display" class="status-text">...</div>
         <div id="code-display" class="pairing-code"></div>
         
-        <button onclick="checkStatus()" class="btn btn-blue">🔄 REFRESCAR ESTADO</button>
-        <a href="/encender-zara" target="_blank" class="btn btn-green">⚡ ENCENDER MOTOR (DESPERTAR)</a>
+        <button id="btn-refresh" onclick="checkStatus()" class="btn btn-blue">🔄 REFRESCAR ESTADO</button>
+        <button id="btn-encender" onclick="encenderMotor()" class="btn btn-green">⚡ ENCENDER MOTOR (DESPERTAR)</button>
     </div>
 
     <div class="card">
         <h3>🚀 OPERACIONES</h3>
         <a href="/monitor" target="_blank" class="btn btn-blue">📺 ABRIR MONITOR CRM</a>
-        <a href="/iniciar-envio" target="_blank" class="btn btn-green">▶️ INICIAR ENVÍO CAMPAÑA</a>
+        <a href="/iniciar-envio" class="btn btn-green">▶️ INICIAR ENVÍO CAMPAÑA</a>
         <br>
         <a href="/reset" onclick="return confirm('¿Seguro?')" class="btn btn-red">💥 RESET DE EMERGENCIA</a>
     </div>
 
     <script>
         async function checkStatus() {
-            document.getElementById('status-display').innerText = "Verificando...";
+            const display = document.getElementById('status-display');
+            display.innerText = "Consultando...";
             try {
                 const res = await fetch('/estado');
-                const html = await res.text(); // El backend devuelve HTML simple a veces
+                let text = await res.text();
                 
-                // Limpiar etiquetas HTML si vienen
-                let text = html.replace(/<[^>]*>/g, '').trim();
-                
-                // Detectar si es código
+                // Limpieza agresiva de JSON y HTML sucio
+                text = text.replace(/<[^>]*>/g, '')  // Quitar HTML
+                           .replace(/{|}|"|status|:/g, '') // Quitar JSON chars
+                           .trim();
+
                 if (text.includes("🔗")) {
-                    document.getElementById('status-display').innerText = "⚠️ VINCULACIÓN REQUERIDA";
+                    display.innerText = "⚠️ VINCULACIÓN REQUERIDA";
+                    display.className = "status-text";
                     document.getElementById('code-display').style.display = "block";
                     document.getElementById('code-display').innerText = text.replace("🔗", "").trim();
+                } else if (text.includes("ONLINE")) {
+                    display.innerText = "✅ ZARA ONLINE";
+                    display.className = "status-text online";
+                    document.getElementById('code-display').style.display = "none";
                 } else {
-                    document.getElementById('status-display').innerText = text || "OFFLINE";
+                    display.innerText = text || "OFFLINE";
+                    display.className = "status-text";
                     document.getElementById('code-display').style.display = "none";
                 }
             } catch(e) {
-                document.getElementById('status-display').innerText = "❌ ERROR DE CONEXIÓN";
+                display.innerText = "❌ ERROR CONEXIÓN";
             }
         }
+
+        async function encenderMotor() {
+            const btn = document.getElementById('btn-encender');
+            const originalText = btn.innerText;
+            
+            // Efecto visual de carga
+            btn.innerText = "⏳ INICIANDO SISTEMAS...";
+            btn.style.opacity = "0.7";
+            btn.disabled = true;
+
+            try {
+                // Petición silenciosa (sin abrir pestaña)
+                await fetch('/encender-zara');
+                
+                // Esperar 5 segundos y verificar estado
+                setTimeout(() => {
+                    checkStatus();
+                    btn.innerText = originalText;
+                    btn.style.opacity = "1";
+                    btn.disabled = false;
+                }, 5000);
+            } catch(e) {
+                alert("Error al intentar encender. Revisa tu conexión.");
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
         // Verificar al cargar
         checkStatus();
     </script>
