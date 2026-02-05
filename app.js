@@ -1,4 +1,4 @@
-// SERVER V6: FIXED MONITOR & IDENTITY
+// SERVER V7: AUTO-TAGGING INTELLIGENCE
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const express = require("express");
@@ -23,6 +23,10 @@ const CLIENTES_FILE = path.join(__dirname, "data/clientes.csv");
 const TEAM_VMA = ["56998251331", "56971350852"];
 const JUAN_CARLOS = "56937648536";
 
+// PALABRAS GATILLO PARA ETIQUETADO AUTOMÁTICO
+const KEYWORDS_BODY = ["body", "elite", "clínica", "clinica", "escáner", "escaner", "lipo", "facial", "antiage", "evaluación", "evaluacion", "alianza", "regalo"];
+const KEYWORDS_VMA = ["talla", "uniforme", "polera", "falda", "pantalon", "buzo", "colegio", "mayor", "stock", "precio"];
+
 const MENSAJES_CAMPAÑA = [
     "Hola {nombre} 👋, soy Camila de VMA. Te escribo para dejar listos tus uniformes hoy... ¿Te ayudo?",
     "¡Hola {nombre}! 🌟 Soy Camila de Uniformes VMA. Estamos avisando para evitar filas... ¿Vemos opciones?",
@@ -38,15 +42,29 @@ let dbClientes = {};
 let envioStatus = { corriendo: false, actual: 0, total: 0, ultimoNombre: "Nadie", logs: [] };
 
 function getChileTime() { return new Date().toLocaleString("es-CL", { timeZone: "America/Santiago", hour12: false }); }
-// NORMALIZAR FONO: SIEMPRE SOLO DIGITOS, SIN + NI @
 function cleanNumber(id) { return id.replace(/\D/g, ''); }
-
 function leerHistorialSeguro() { try { return JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')); } catch { return {}; } }
 function guardarHistorial(data) { fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(data, null, 2)); }
 function getProgreso() { try { return JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf-8')).index || 0; } catch { return 0; } }
 function saveProgreso(i) { fs.writeFileSync(PROGRESS_FILE, JSON.stringify({ index: i })); }
 function cargarBaseDatos() { try { if (fs.existsSync(CLIENTES_FILE)) { fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').forEach(l => { const p = l.split(','); if(p.length>=2) dbClientes[cleanNumber(p[0])] = p[1].trim(); }); } } catch (e) {} }
 function cargarEstadoBot() { try { if (fs.existsSync(BOT_STATE_FILE)) { const s = JSON.parse(fs.readFileSync(BOT_STATE_FILE, 'utf-8')); if(s.active) { botActivo=true; connectToWhatsApp(); } } } catch(e){} }
+
+// LÓGICA DE AUTO-ETIQUETADO
+function autoTag(chat, text) {
+    if (!chat.tags) chat.tags = [];
+    const lower = text.toLowerCase();
+    
+    // Si habla de cosas de clínica, agregar tag BodyElite
+    if (KEYWORDS_BODY.some(k => lower.includes(k))) {
+        if (!chat.tags.includes('BodyElite')) chat.tags.push('BodyElite');
+    }
+    // Si habla de uniformes, asegurar tag VMA
+    if (KEYWORDS_VMA.some(k => lower.includes(k))) {
+        if (!chat.tags.includes('VMA')) chat.tags.push('VMA');
+    }
+    return chat;
+}
 
 async function connectToWhatsApp() {
     if (!botActivo) return;
@@ -70,13 +88,16 @@ async function connectToWhatsApp() {
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
         
         if (text) {
-            const fono = cleanNumber(jid); // LIMPIEZA CRITICA
+            const fono = cleanNumber(jid);
             const nombrePush = dbClientes[fono] || msg.pushName || "Cliente";
             
             let chats = leerHistorialSeguro();
-            // INICIAR SIEMPRE COMO VMA POR DEFECTO
+            // INICIALIZACIÓN
             if (!chats[fono]) chats[fono] = { nombre: nombrePush, mensajes: [], firstAlertSent: false, tags: ['VMA'], unread: 0 };
             
+            // AUTO-TAGGING AL RECIBIR MENSAJE
+            chats[fono] = autoTag(chats[fono], text);
+
             chats[fono].mensajes.push({ hora: getChileTime(), texto: text, from: 'Cliente' });
             chats[fono].lastTs = Date.now();
             chats[fono].unread = (chats[fono].unread || 0) + 1;
@@ -89,9 +110,10 @@ async function connectToWhatsApp() {
             guardarHistorial(chats);
             
             await delay(3000 + Math.random() * 2000);
-            
-            // INTELIGENCIA GPT
             const response = await chatWithGPT(text, fono);
+            
+            // AUTO-TAGGING TAMBIÉN EN LA RESPUESTA DEL BOT (Si el bot ofrece la clínica, se etiqueta)
+            chats[fono] = autoTag(chats[fono], response);
             
             await sock.sendMessage(jid, { text: response });
             chats[fono].mensajes.push({ hora: getChileTime(), texto: response, from: 'Zara' });
@@ -120,7 +142,7 @@ app.get('/iniciar-envio', async (req, res) => {
             const line = lines[i]; if (line.includes('telefono')) continue;
             const [phone, name] = line.split(','); if(!phone || !name) continue;
             
-            const cleanPhone = cleanNumber(phone); // LIMPIEZA
+            const cleanPhone = cleanNumber(phone);
             const jid = cleanPhone + "@s.whatsapp.net";
             
             try {
@@ -151,4 +173,4 @@ app.get('/historial-chats', (req, res) => { res.json(leerHistorialSeguro()); });
 app.post('/api/send-manual', async (req, res) => { const { fono, texto } = req.body; const clean = cleanNumber(fono); if (botActivo && sock) { await sock.sendMessage(clean+"@s.whatsapp.net", { text: texto }); let c=leerHistorialSeguro(); if(c[clean]){ c[clean].mensajes.push({ hora: getChileTime(), texto: texto, from: 'Zara (Manual)' }); guardarHistorial(c); } res.json({success:true}); } });
 app.post('/api/tag', (req, res) => { const { fono, tag } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { if(!c[fono].tags) c[fono].tags=[]; if(!c[fono].tags.includes(tag)) c[fono].tags.push(tag); guardarHistorial(c); } res.json({success:true}); });
 app.post('/api/read', (req, res) => { const { fono } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { c[fono].unread=0; guardarHistorial(c); } res.json({success:true}); });
-app.listen(PORT, () => { console.log("SERVER V6: FIXES APPLIED"); cargarBaseDatos(); cargarEstadoBot(); });
+app.listen(PORT, () => { console.log("SERVER V7: AUTO-TAGGING ON"); cargarBaseDatos(); cargarEstadoBot(); });
