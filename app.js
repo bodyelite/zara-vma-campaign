@@ -1,4 +1,4 @@
-// FORCE UPDATE: MODO QR ACTIVADO - V5.1
+// SERVER V6: FIXED MONITOR & IDENTITY
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const express = require("express");
@@ -24,47 +24,39 @@ const TEAM_VMA = ["56998251331", "56971350852"];
 const JUAN_CARLOS = "56937648536";
 
 const MENSAJES_CAMPAÑA = [
-    "Hola {nombre} 👋, soy Camila de VMA. Te escribo para dejar listos tus uniformes hoy. Te recomiendo hacerlo pronto porque desde la segunda semana de febrero las filas son terribles 🏃💨. ¿Te ayudo a revisar tallas?",
-    "¡Hola {nombre}! 🌟 Soy Camila de Uniformes VMA. Estamos avisando a los apoderados que es mejor ver lo del uniforme esta semana para evitar las filas de locos de febrero 🤯. ¿Quieres que veamos las opciones ahora?",
-    "{nombre}, ¿cómo estás? Soy Camila de VMA 👋. Te escribo para ahorrarte el estrés de febrero con los uniformes. Estamos organizando la entrega del stock 2025. ¿Te gustaría dejarlo listo hoy? Avísame y te ayudo."
+    "Hola {nombre} 👋, soy Camila de VMA. Te escribo para dejar listos tus uniformes hoy... ¿Te ayudo?",
+    "¡Hola {nombre}! 🌟 Soy Camila de Uniformes VMA. Estamos avisando para evitar filas... ¿Vemos opciones?",
+    "{nombre}, ¿cómo estás? Soy Camila de VMA 👋. Te escribo para ahorrarte estrés... ¿Te ayudo?"
 ];
 
 let sock;
 let botActivo = false;
 let stopSignal = false;
-let webStatus = "ESPERANDO ORDEN...";
+let webStatus = "ESPERANDO...";
 let qrCode = null; 
 let dbClientes = {}; 
 let envioStatus = { corriendo: false, actual: 0, total: 0, ultimoNombre: "Nadie", logs: [] };
 
 function getChileTime() { return new Date().toLocaleString("es-CL", { timeZone: "America/Santiago", hour12: false }); }
+// NORMALIZAR FONO: SIEMPRE SOLO DIGITOS, SIN + NI @
+function cleanNumber(id) { return id.replace(/\D/g, ''); }
+
 function leerHistorialSeguro() { try { return JSON.parse(fs.readFileSync(CHAT_HISTORY_FILE, 'utf-8')); } catch { return {}; } }
 function guardarHistorial(data) { fs.writeFileSync(CHAT_HISTORY_FILE, JSON.stringify(data, null, 2)); }
 function getProgreso() { try { return JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf-8')).index || 0; } catch { return 0; } }
 function saveProgreso(i) { fs.writeFileSync(PROGRESS_FILE, JSON.stringify({ index: i })); }
-function cargarBaseDatos() { try { if (fs.existsSync(CLIENTES_FILE)) { fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').forEach(l => { const p = l.split(','); if(p.length>=2) dbClientes[p[0].trim().replace(/\D/g,'')] = p[1].trim(); }); } } catch (e) {} }
+function cargarBaseDatos() { try { if (fs.existsSync(CLIENTES_FILE)) { fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').forEach(l => { const p = l.split(','); if(p.length>=2) dbClientes[cleanNumber(p[0])] = p[1].trim(); }); } } catch (e) {} }
 function cargarEstadoBot() { try { if (fs.existsSync(BOT_STATE_FILE)) { const s = JSON.parse(fs.readFileSync(BOT_STATE_FILE, 'utf-8')); if(s.active) { botActivo=true; connectToWhatsApp(); } } } catch(e){} }
 
 async function connectToWhatsApp() {
     if (!botActivo) return;
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    
-    // MODO QR ACTIVADO: printQRInTerminal: false
     sock = makeWASocket({ auth: state, logger: pino({ level: "silent" }), browser: ["ZaraVMA", "Chrome", "1.0.0"], printQRInTerminal: false });
     
     sock.ev.on("connection.update", (u) => {
         const { connection, lastDisconnect, qr } = u;
-        
-        if (qr) {
-            qrCode = qr;
-            webStatus = "QR"; 
-        }
-
-        if (connection === "open") {
-            webStatus = "✅ ZARA ONLINE";
-            qrCode = null; 
-        }
-
+        if (qr) { qrCode = qr; webStatus = "QR"; }
+        if (connection === "open") { webStatus = "✅ ZARA ONLINE"; qrCode = null; }
         if (connection === "close") { 
             if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut && botActivo) connectToWhatsApp(); 
             else { botActivo = false; webStatus = "❌ Desconectado"; qrCode = null; } 
@@ -76,22 +68,31 @@ async function connectToWhatsApp() {
         if (!msg.message || msg.key.fromMe || !botActivo) return;
         const jid = msg.key.remoteJid;
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        
         if (text) {
-            const fono = jid.split('@')[0].replace(/\D/g, '');
+            const fono = cleanNumber(jid); // LIMPIEZA CRITICA
             const nombrePush = dbClientes[fono] || msg.pushName || "Cliente";
+            
             let chats = leerHistorialSeguro();
-            if (!chats[fono]) chats[fono] = { nombre: nombrePush, mensajes: [], firstAlertSent: false, tags: [], unread: 0 };
+            // INICIAR SIEMPRE COMO VMA POR DEFECTO
+            if (!chats[fono]) chats[fono] = { nombre: nombrePush, mensajes: [], firstAlertSent: false, tags: ['VMA'], unread: 0 };
+            
             chats[fono].mensajes.push({ hora: getChileTime(), texto: text, from: 'Cliente' });
             chats[fono].lastTs = Date.now();
             chats[fono].unread = (chats[fono].unread || 0) + 1;
+            
             if (!chats[fono].firstAlertSent) {
                 const alerta = `🔔 *LEAD*\n👤 ${nombrePush}\n📱 +${fono}\n💬 "${text}"`;
                 for(const s of [...TEAM_VMA, JUAN_CARLOS]) await sock.sendMessage(s+"@s.whatsapp.net", {text: alerta});
                 chats[fono].firstAlertSent = true;
             }
             guardarHistorial(chats);
+            
             await delay(3000 + Math.random() * 2000);
+            
+            // INTELIGENCIA GPT
             const response = await chatWithGPT(text, fono);
+            
             await sock.sendMessage(jid, { text: response });
             chats[fono].mensajes.push({ hora: getChileTime(), texto: response, from: 'Zara' });
             guardarHistorial(chats);
@@ -99,16 +100,10 @@ async function connectToWhatsApp() {
     });
 }
 
+// ENDPOINTS
 app.get('/reset', (req, res) => { botActivo = false; qrCode = null; try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); res.send("RESET OK"); } catch(e) { res.send(e.message); } });
 app.get('/encender-zara', (req, res) => { botActivo = true; fs.writeFileSync(BOT_STATE_FILE, JSON.stringify({ active: true })); connectToWhatsApp(); res.redirect('/'); });
-
-app.get('/estado', async (req, res) => { 
-    if (qrCode) {
-        res.json({ status: "QR", qr: qrCode });
-    } else {
-        res.json({ status: webStatus });
-    }
-});
+app.get('/estado', async (req, res) => { if (qrCode) res.json({ status: "QR", qr: qrCode }); else res.json({ status: webStatus }); });
 
 app.get('/iniciar-envio', async (req, res) => {
     if (!botActivo || !sock) return res.send("<h1>❌ ZARA OFFLINE</h1>");
@@ -124,14 +119,21 @@ app.get('/iniciar-envio', async (req, res) => {
             if (i < startIndex) continue;
             const line = lines[i]; if (line.includes('telefono')) continue;
             const [phone, name] = line.split(','); if(!phone || !name) continue;
-            const jid = phone.trim().replace('+','') + "@s.whatsapp.net";
+            
+            const cleanPhone = cleanNumber(phone); // LIMPIEZA
+            const jid = cleanPhone + "@s.whatsapp.net";
+            
             try {
                 const msg = MENSAJES_CAMPAÑA[Math.floor(Math.random()*MENSAJES_CAMPAÑA.length)].replace("{nombre}", name.trim());
                 await sock.sendMessage(jid, { text: msg });
-                let chats = leerHistorialSeguro(); const fono = phone.trim().replace('+','');
-                if (!chats[fono]) chats[fono] = { nombre: name.trim(), mensajes: [], firstAlertSent: false, tags: ['Campaña'], unread: 0 };
-                chats[fono].mensajes.push({ hora: getChileTime(), texto: msg, from: 'Zara (Campaña)' });
-                chats[fono].lastTs = Date.now(); guardarHistorial(chats);
+                
+                let chats = leerHistorialSeguro(); 
+                if (!chats[cleanPhone]) chats[cleanPhone] = { nombre: name.trim(), mensajes: [], firstAlertSent: false, tags: ['Campaña', 'VMA'], unread: 0 };
+                
+                chats[cleanPhone].mensajes.push({ hora: getChileTime(), texto: msg, from: 'Zara (Campaña)' });
+                chats[cleanPhone].lastTs = Date.now(); 
+                guardarHistorial(chats);
+                
                 envioStatus.logs.unshift(`✅ ${getChileTime()} - ${name.trim()}`);
                 envioStatus.actual = i + 1; envioStatus.ultimoNombre = name.trim(); saveProgreso(i + 1); 
                 await delay(Math.floor(Math.random() * (300000 - 180000 + 1)) + 180000);
@@ -139,13 +141,14 @@ app.get('/iniciar-envio', async (req, res) => {
         } envioStatus.corriendo = false;
     })();
 });
+
 app.get('/pausar', (req, res) => { stopSignal = true; res.redirect('/progreso'); });
 app.get('/reiniciar-lista', (req, res) => { saveProgreso(0); res.redirect('/'); });
 app.get('/progreso', (req, res) => { res.send(`<!DOCTYPE html><html><head><meta http-equiv="refresh" content="5"><title>🚀 ENVÍO</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;background:#111b21;color:white;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#202c33;padding:30px;border-radius:15px;width:500px;text-align:center}.progress-bar{background:#374045;border-radius:10px;height:20px;overflow:hidden;margin:20px 0}.fill{background:#00a884;height:100%;width:${(envioStatus.actual/envioStatus.total)*100}%}.log-box{background:#0b141a;color:#0f0;font-family:monospace;text-align:left;padding:10px;height:200px;overflow-y:auto;border-radius:5px;font-size:0.85rem}h1{color:#00a884;margin-bottom:5px}.btn{padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;text-decoration:none;border:none;margin:5px}.btn-red{background:#e53935;color:white}.btn-green{background:#00a884;color:white}</style></head><body><div class="card"><h1>🚀 CAMPAÑA</h1><div class="progress-bar"><div class="fill"></div></div><p>Progreso: <b>${envioStatus.actual} / ${envioStatus.total}</b> | Último: <b>${envioStatus.ultimoNombre}</b></p><div class="log-box">${envioStatus.logs.join("<br>")}</div><br>${envioStatus.corriendo ? '<a href="/pausar"><button class="btn btn-red">⏸ PAUSAR</button></a>' : '<a href="/iniciar-envio"><button class="btn btn-green">▶️ REANUDAR</button></a>'}<a href="/monitor"><button class="btn" style="background:#027eb5;color:white">📺 MONITOR</button></a></div></body></html>`); });
 app.get('/api/status-envio', (req, res) => { res.json(envioStatus); });
 app.get('/monitor', (req, res) => res.sendFile(path.join(__dirname, 'public/monitor.html')));
 app.get('/historial-chats', (req, res) => { res.json(leerHistorialSeguro()); });
-app.post('/api/send-manual', async (req, res) => { const { fono, texto } = req.body; if (botActivo && sock) { await sock.sendMessage(fono+"@s.whatsapp.net", { text: texto }); let c=leerHistorialSeguro(); if(c[fono]){ c[fono].mensajes.push({ hora: getChileTime(), texto: texto, from: 'Zara (Manual)' }); guardarHistorial(c); } res.json({success:true}); } });
+app.post('/api/send-manual', async (req, res) => { const { fono, texto } = req.body; const clean = cleanNumber(fono); if (botActivo && sock) { await sock.sendMessage(clean+"@s.whatsapp.net", { text: texto }); let c=leerHistorialSeguro(); if(c[clean]){ c[clean].mensajes.push({ hora: getChileTime(), texto: texto, from: 'Zara (Manual)' }); guardarHistorial(c); } res.json({success:true}); } });
 app.post('/api/tag', (req, res) => { const { fono, tag } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { if(!c[fono].tags) c[fono].tags=[]; if(!c[fono].tags.includes(tag)) c[fono].tags.push(tag); guardarHistorial(c); } res.json({success:true}); });
 app.post('/api/read', (req, res) => { const { fono } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { c[fono].unread=0; guardarHistorial(c); } res.json({success:true}); });
-app.listen(PORT, () => { console.log("SERVER V5.1: FORCE QR UPDATE"); cargarBaseDatos(); cargarEstadoBot(); });
+app.listen(PORT, () => { console.log("SERVER V6: FIXES APPLIED"); cargarBaseDatos(); cargarEstadoBot(); });
