@@ -1,4 +1,4 @@
-// SERVER V7: AUTO-TAGGING INTELLIGENCE
+// V7.1 FORCE UPDATE: AUTO-TAGGING & ID FIX
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const express = require("express");
@@ -23,7 +23,6 @@ const CLIENTES_FILE = path.join(__dirname, "data/clientes.csv");
 const TEAM_VMA = ["56998251331", "56971350852"];
 const JUAN_CARLOS = "56937648536";
 
-// PALABRAS GATILLO PARA ETIQUETADO AUTOMÁTICO
 const KEYWORDS_BODY = ["body", "elite", "clínica", "clinica", "escáner", "escaner", "lipo", "facial", "antiage", "evaluación", "evaluacion", "alianza", "regalo"];
 const KEYWORDS_VMA = ["talla", "uniforme", "polera", "falda", "pantalon", "buzo", "colegio", "mayor", "stock", "precio"];
 
@@ -50,19 +49,11 @@ function saveProgreso(i) { fs.writeFileSync(PROGRESS_FILE, JSON.stringify({ inde
 function cargarBaseDatos() { try { if (fs.existsSync(CLIENTES_FILE)) { fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').forEach(l => { const p = l.split(','); if(p.length>=2) dbClientes[cleanNumber(p[0])] = p[1].trim(); }); } } catch (e) {} }
 function cargarEstadoBot() { try { if (fs.existsSync(BOT_STATE_FILE)) { const s = JSON.parse(fs.readFileSync(BOT_STATE_FILE, 'utf-8')); if(s.active) { botActivo=true; connectToWhatsApp(); } } } catch(e){} }
 
-// LÓGICA DE AUTO-ETIQUETADO
 function autoTag(chat, text) {
     if (!chat.tags) chat.tags = [];
     const lower = text.toLowerCase();
-    
-    // Si habla de cosas de clínica, agregar tag BodyElite
-    if (KEYWORDS_BODY.some(k => lower.includes(k))) {
-        if (!chat.tags.includes('BodyElite')) chat.tags.push('BodyElite');
-    }
-    // Si habla de uniformes, asegurar tag VMA
-    if (KEYWORDS_VMA.some(k => lower.includes(k))) {
-        if (!chat.tags.includes('VMA')) chat.tags.push('VMA');
-    }
+    if (KEYWORDS_BODY.some(k => lower.includes(k))) { if (!chat.tags.includes('BodyElite')) chat.tags.push('BodyElite'); }
+    if (KEYWORDS_VMA.some(k => lower.includes(k))) { if (!chat.tags.includes('VMA')) chat.tags.push('VMA'); }
     return chat;
 }
 
@@ -92,10 +83,8 @@ async function connectToWhatsApp() {
             const nombrePush = dbClientes[fono] || msg.pushName || "Cliente";
             
             let chats = leerHistorialSeguro();
-            // INICIALIZACIÓN
             if (!chats[fono]) chats[fono] = { nombre: nombrePush, mensajes: [], firstAlertSent: false, tags: ['VMA'], unread: 0 };
             
-            // AUTO-TAGGING AL RECIBIR MENSAJE
             chats[fono] = autoTag(chats[fono], text);
 
             chats[fono].mensajes.push({ hora: getChileTime(), texto: text, from: 'Cliente' });
@@ -112,7 +101,6 @@ async function connectToWhatsApp() {
             await delay(3000 + Math.random() * 2000);
             const response = await chatWithGPT(text, fono);
             
-            // AUTO-TAGGING TAMBIÉN EN LA RESPUESTA DEL BOT (Si el bot ofrece la clínica, se etiqueta)
             chats[fono] = autoTag(chats[fono], response);
             
             await sock.sendMessage(jid, { text: response });
@@ -173,4 +161,4 @@ app.get('/historial-chats', (req, res) => { res.json(leerHistorialSeguro()); });
 app.post('/api/send-manual', async (req, res) => { const { fono, texto } = req.body; const clean = cleanNumber(fono); if (botActivo && sock) { await sock.sendMessage(clean+"@s.whatsapp.net", { text: texto }); let c=leerHistorialSeguro(); if(c[clean]){ c[clean].mensajes.push({ hora: getChileTime(), texto: texto, from: 'Zara (Manual)' }); guardarHistorial(c); } res.json({success:true}); } });
 app.post('/api/tag', (req, res) => { const { fono, tag } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { if(!c[fono].tags) c[fono].tags=[]; if(!c[fono].tags.includes(tag)) c[fono].tags.push(tag); guardarHistorial(c); } res.json({success:true}); });
 app.post('/api/read', (req, res) => { const { fono } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { c[fono].unread=0; guardarHistorial(c); } res.json({success:true}); });
-app.listen(PORT, () => { console.log("SERVER V7: AUTO-TAGGING ON"); cargarBaseDatos(); cargarEstadoBot(); });
+app.listen(PORT, () => { console.log("SERVER V7.1: FINAL FIX"); cargarBaseDatos(); cargarEstadoBot(); });
