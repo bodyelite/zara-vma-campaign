@@ -1,4 +1,4 @@
-// V7.1 FORCE UPDATE: AUTO-TAGGING & ID FIX
+// SERVER V7.2: RETROACTIVE TAGGING
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const express = require("express");
@@ -49,12 +49,41 @@ function saveProgreso(i) { fs.writeFileSync(PROGRESS_FILE, JSON.stringify({ inde
 function cargarBaseDatos() { try { if (fs.existsSync(CLIENTES_FILE)) { fs.readFileSync(CLIENTES_FILE, 'utf-8').split('\n').forEach(l => { const p = l.split(','); if(p.length>=2) dbClientes[cleanNumber(p[0])] = p[1].trim(); }); } } catch (e) {} }
 function cargarEstadoBot() { try { if (fs.existsSync(BOT_STATE_FILE)) { const s = JSON.parse(fs.readFileSync(BOT_STATE_FILE, 'utf-8')); if(s.active) { botActivo=true; connectToWhatsApp(); } } } catch(e){} }
 
+// LÓGICA DE AUTO-ETIQUETADO
 function autoTag(chat, text) {
     if (!chat.tags) chat.tags = [];
     const lower = text.toLowerCase();
     if (KEYWORDS_BODY.some(k => lower.includes(k))) { if (!chat.tags.includes('BodyElite')) chat.tags.push('BodyElite'); }
     if (KEYWORDS_VMA.some(k => lower.includes(k))) { if (!chat.tags.includes('VMA')) chat.tags.push('VMA'); }
     return chat;
+}
+
+// BARRIDO HISTÓRICO AL INICIAR
+function retroactiveTagging() {
+    console.log("🧹 INICIANDO BARRIDO DE ETIQUETAS HISTÓRICAS...");
+    let chats = leerHistorialSeguro();
+    let changes = false;
+    
+    Object.keys(chats).forEach(fono => {
+        let chat = chats[fono];
+        // Revisar TODOS los mensajes de este chat
+        const fullText = chat.mensajes.map(m => m.texto).join(" ");
+        
+        // Aplicar etiquetas
+        const oldTags = JSON.stringify(chat.tags || []);
+        chat = autoTag(chat, fullText);
+        
+        if (JSON.stringify(chat.tags) !== oldTags) {
+            changes = true;
+        }
+    });
+
+    if (changes) {
+        guardarHistorial(chats);
+        console.log("✅ ETIQUETADO RETROACTIVO COMPLETADO.");
+    } else {
+        console.log("👍 HISTORIAL YA ESTABA ETIQUETADO.");
+    }
 }
 
 async function connectToWhatsApp() {
@@ -81,7 +110,6 @@ async function connectToWhatsApp() {
         if (text) {
             const fono = cleanNumber(jid);
             const nombrePush = dbClientes[fono] || msg.pushName || "Cliente";
-            
             let chats = leerHistorialSeguro();
             if (!chats[fono]) chats[fono] = { nombre: nombrePush, mensajes: [], firstAlertSent: false, tags: ['VMA'], unread: 0 };
             
@@ -97,12 +125,9 @@ async function connectToWhatsApp() {
                 chats[fono].firstAlertSent = true;
             }
             guardarHistorial(chats);
-            
             await delay(3000 + Math.random() * 2000);
             const response = await chatWithGPT(text, fono);
-            
             chats[fono] = autoTag(chats[fono], response);
-            
             await sock.sendMessage(jid, { text: response });
             chats[fono].mensajes.push({ hora: getChileTime(), texto: response, from: 'Zara' });
             guardarHistorial(chats);
@@ -129,21 +154,16 @@ app.get('/iniciar-envio', async (req, res) => {
             if (i < startIndex) continue;
             const line = lines[i]; if (line.includes('telefono')) continue;
             const [phone, name] = line.split(','); if(!phone || !name) continue;
-            
             const cleanPhone = cleanNumber(phone);
             const jid = cleanPhone + "@s.whatsapp.net";
-            
             try {
                 const msg = MENSAJES_CAMPAÑA[Math.floor(Math.random()*MENSAJES_CAMPAÑA.length)].replace("{nombre}", name.trim());
                 await sock.sendMessage(jid, { text: msg });
-                
                 let chats = leerHistorialSeguro(); 
                 if (!chats[cleanPhone]) chats[cleanPhone] = { nombre: name.trim(), mensajes: [], firstAlertSent: false, tags: ['Campaña', 'VMA'], unread: 0 };
-                
                 chats[cleanPhone].mensajes.push({ hora: getChileTime(), texto: msg, from: 'Zara (Campaña)' });
                 chats[cleanPhone].lastTs = Date.now(); 
                 guardarHistorial(chats);
-                
                 envioStatus.logs.unshift(`✅ ${getChileTime()} - ${name.trim()}`);
                 envioStatus.actual = i + 1; envioStatus.ultimoNombre = name.trim(); saveProgreso(i + 1); 
                 await delay(Math.floor(Math.random() * (300000 - 180000 + 1)) + 180000);
@@ -161,4 +181,9 @@ app.get('/historial-chats', (req, res) => { res.json(leerHistorialSeguro()); });
 app.post('/api/send-manual', async (req, res) => { const { fono, texto } = req.body; const clean = cleanNumber(fono); if (botActivo && sock) { await sock.sendMessage(clean+"@s.whatsapp.net", { text: texto }); let c=leerHistorialSeguro(); if(c[clean]){ c[clean].mensajes.push({ hora: getChileTime(), texto: texto, from: 'Zara (Manual)' }); guardarHistorial(c); } res.json({success:true}); } });
 app.post('/api/tag', (req, res) => { const { fono, tag } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { if(!c[fono].tags) c[fono].tags=[]; if(!c[fono].tags.includes(tag)) c[fono].tags.push(tag); guardarHistorial(c); } res.json({success:true}); });
 app.post('/api/read', (req, res) => { const { fono } = req.body; let c = leerHistorialSeguro(); if(c[fono]) { c[fono].unread=0; guardarHistorial(c); } res.json({success:true}); });
-app.listen(PORT, () => { console.log("SERVER V7.1: FINAL FIX"); cargarBaseDatos(); cargarEstadoBot(); });
+app.listen(PORT, () => { 
+    console.log("SERVER V7.2: RETROACTIVE TAGGING READY"); 
+    cargarBaseDatos(); 
+    cargarEstadoBot(); 
+    retroactiveTagging(); // <--- AQUÍ ESTÁ LA MAGIA
+});
